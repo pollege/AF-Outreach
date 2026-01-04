@@ -9,8 +9,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Cold Outreach AI",
-  description: "AI-powered B2B Cold Outreach Automation",
+  title: "AF Outreach",
+  description: "B2B Cold Outreach Automation by AF Automations",
 };
 
 export default function RootLayout({

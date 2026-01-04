@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { openai } from '@/lib/openai';
+import { searchWeb } from '@/lib/brave_search';
 
 export async function GET() {
     try {
@@ -21,31 +22,31 @@ export async function GET() {
 
         // 2. Process each lead
         for (const lead of leads) {
-            // --- Search Step (Mocked for now as we don't have Brave Key) ---
-            // In future: const searchResults = await braveSearch.search(`"${lead.company_name}" news`);
-            const mockSearchResults = [
-                `${lead.company_name} announces expansion into European market.`,
-                `${lead.company_name} raises Series A funding led by TopTier VC.`,
-                `Challenges in ${lead.industry}: Rising costs and compliance.`
-            ];
+            // --- Search Step ---
+            // Search for company news and challenges in Italian
+            const query = `"${lead.company_name}" notizie business problemi settore ${lead.industry}`;
+            const searchResults = await searchWeb(query);
+
+            const searchContext = searchResults.length > 0
+                ? searchResults.map((r: any) => `- ${r.title}: ${r.description}`).join('\n')
+                : "No search results found";
 
             // --- OpenAI Step ---
             const completion = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo", // or gpt-4o
+                model: "gpt-3.5-turbo",
                 messages: [
                     {
                         role: "system",
-                        content: "You are a B2B research assistant. Extract 3 recent news items and 2 potential pain points from the search context provided for the company."
+                        content: "Sei un assistente di ricerca B2B. Estrai 3 notizie recenti e 2 potenziali punti deboli (pain points) dal contesto di ricerca fornito per l'azienda. RISPONDI IN ITALIANO (JSON)."
                     },
                     {
                         role: "user",
-                        content: `Company: ${lead.company_name}
-Sector: ${lead.industry}
-Search Results:
-${mockSearchResults.join('\n')}
+                        content: `Azienda: ${lead.company_name}
+Settore: ${lead.industry}
+Risultati Ricerca:
+${searchContext}
 
-Format as JSON: { "recent_news": [], "pain_points": [] }
-`
+Format as JSON: { "recent_news": ["..."], "pain_points": ["..."] }`
                     }
                 ],
                 response_format: { type: "json_object" }

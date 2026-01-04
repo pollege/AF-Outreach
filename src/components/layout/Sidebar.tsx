@@ -27,11 +27,12 @@ export function Sidebar() {
     return (
         <aside className="fixed left-4 top-4 bottom-4 w-64 glass-dark rounded-2xl flex flex-col p-4 z-50 text-slate-100 transition-all duration-300">
             {/* Logo */}
-            <div className="flex items-center gap-2 px-2 py-4 mb-6">
-                <div className="bg-blue-600 p-2 rounded-lg">
-                    <Sparkles className="w-5 h-5 text-white" />
+            <div className="flex flex-col items-center justify-center gap-2 px-2 py-6 mb-2">
+                <div className="w-16 h-16 relative flex-shrink-0">
+                    {/* Reverted filter as requested */}
+                    <img src="/logo.png" alt="AF" className="object-contain w-full h-full" />
                 </div>
-                <span className="font-bold text-xl tracking-tight">ColdAi</span>
+                <span className="font-bold text-lg tracking-tight text-center">AF Outreach</span>
             </div>
 
             {/* Navigation */}
@@ -61,11 +62,27 @@ export function Sidebar() {
             </nav>
 
             {/* Footer / User Profile */}
-            <div className="mt-auto pt-4 border-t border-white/10">
-                <button className="flex items-center gap-3 px-4 py-3 w-full rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors">
-                    <LogOut className="w-5 h-5" />
-                    <span className="font-medium">Logout</span>
-                </button>
+            <div className="mt-auto space-y-4">
+                <div className="pt-4 border-t border-white/10">
+                    <button className="flex items-center gap-3 px-4 py-3 w-full rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors">
+                        <LogOut className="w-5 h-5" />
+                        <span className="font-medium">Logout</span>
+                    </button>
+                </div>
+
+                {/* Developer Credits */}
+                <div className="px-4 pb-2 text-xs text-slate-500 flex flex-col items-center text-center">
+                    <span>Sviluppato da <br /><span className="text-slate-400 font-medium">Alessandro Federici</span></span>
+                    <a
+                        href="https://af-automations.framer.website"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                        <Sparkles className="w-3 h-3" />
+                        AF Automations
+                    </a>
+                </div>
             </div>
         </aside>
     );
