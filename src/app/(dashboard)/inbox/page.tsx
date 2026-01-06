@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Header } from "@/components/layout/Header";
 import { supabase } from "@/lib/supabase";
-import { Loader2, Search, User, Clock, Send, Archive, Trash2, RefreshCw, Mail, Reply, X, PenTool, Settings } from "lucide-react";
+import { Loader2, Search, User, Clock, Send, Archive, Trash2, RefreshCw, Mail, Reply, X, PenTool, Settings, Maximize2, Minimize2 } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
@@ -72,6 +72,7 @@ export default function InboxPage() {
     const [signature, setSignature] = useState("");
     const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
     const [tempSignature, setTempSignature] = useState("");
+    const [isReplyModalOpen, setIsReplyModalOpen] = useState(false);
 
     // Filter
     const [filter, setFilter] = useState<'all' | 'unread'>('all');
@@ -237,6 +238,99 @@ export default function InboxPage() {
                         <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 bg-slate-50 dark:bg-slate-900/50">
                             <Button variant="ghost" onClick={() => setIsSignatureModalOpen(false)}>Annulla</Button>
                             <Button onClick={saveSignature} className="bg-blue-600 hover:bg-blue-700 text-white">Salva Firma</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Reply Modal (Expanded) */}
+            {isReplyModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="bg-white dark:bg-slate-950 rounded-xl shadow-2xl w-[95vw] h-[95vh] flex flex-col border border-slate-200 dark:border-slate-800">
+                        {/* Modal Header */}
+                        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900">
+                            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                <Reply className="w-5 h-5 text-blue-600" />
+                                Rispondi a {conversations.find(c => c.lead_id === selectedLeadId)?.lead_name}
+                            </h3>
+                            <div className="flex gap-2">
+                                <Button variant="ghost" size="sm" onClick={() => setIsReplyModalOpen(false)} title="Riduci a icona">
+                                    <Minimize2 className="w-5 h-5 text-slate-500" />
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* Recipients Area */}
+                        <div className="p-4 border-b border-slate-100 dark:border-slate-800 space-y-3 bg-white dark:bg-slate-950">
+                            <div className="flex items-start gap-3">
+                                <span className="text-sm font-semibold text-slate-500 mt-1.5 w-10">A:</span>
+                                <EmailTagInput
+                                    value={replyTo}
+                                    onChange={setReplyTo}
+                                    className="flex-1 min-h-[38px]"
+                                    placeholder="Destinatari"
+                                />
+                                <div className="flex gap-1 mt-1">
+                                    {(!showCc && replyCc.length === 0) && <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setShowCc(true)}>Cc</Button>}
+                                    {(!showBcc && replyBcc.length === 0) && <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setShowBcc(true)}>CCN</Button>}
+                                </div>
+                            </div>
+
+                            {(showCc || replyCc.length > 0) && (
+                                <div className="flex items-start gap-3 animate-in slide-in-from-top-1">
+                                    <span className="text-sm font-semibold text-slate-500 mt-1.5 w-10">Cc:</span>
+                                    <EmailTagInput
+                                        value={replyCc}
+                                        onChange={setReplyCc}
+                                        className="flex-1 min-h-[38px]"
+                                        placeholder="Copia Conoscenza"
+                                    />
+                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full mt-0.5" onClick={() => { setShowCc(false); setReplyCc([]); }}>
+                                        <X className="w-4 h-4 text-slate-400" />
+                                    </Button>
+                                </div>
+                            )}
+
+                            {(showBcc || replyBcc.length > 0) && (
+                                <div className="flex items-start gap-3 animate-in slide-in-from-top-1">
+                                    <span className="text-sm font-semibold text-slate-500 mt-1.5 w-10">CCN:</span>
+                                    <EmailTagInput
+                                        value={replyBcc}
+                                        onChange={setReplyBcc}
+                                        className="flex-1 min-h-[38px]"
+                                        placeholder="Copia Nascosta"
+                                    />
+                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full mt-0.5" onClick={() => { setShowBcc(false); setReplyBcc([]); }}>
+                                        <X className="w-4 h-4 text-slate-400" />
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Editor Area */}
+                        <div className="flex-1 overflow-hidden flex flex-col">
+                            <RichTextEditor
+                                value={replyText}
+                                onChange={setReplyText}
+                                onEditorReady={setEditor} // Takes over the ref
+                                className="border-0 h-full rounded-none focus-visible:ring-0"
+                                customActions={
+                                    <>
+                                        <button onClick={insertSignature} className="p-2 hover:bg-slate-100 rounded" title="Inserisci Firma"><PenTool className="w-4 h-4" /></button>
+                                        <button onClick={() => setIsSignatureModalOpen(true)} className="p-2 hover:bg-slate-100 rounded" title="Impostazioni Firma"><Settings className="w-4 h-4" /></button>
+                                    </>
+                                }
+                            />
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
+                            <Button variant="ghost" onClick={() => setIsReplyModalOpen(false)}>
+                                Continua nell'editor piccolo
+                            </Button>
+                            <Button onClick={() => { setIsReplyModalOpen(false); handleReply(); }} disabled={!replyText.trim() || replyText === '<p></p>'} className="bg-blue-600 hover:bg-blue-700 text-white px-8">
+                                Invia Messaggio <Send className="w-4 h-4 ml-2" />
+                            </Button>
                         </div>
                     </div>
                 </div>
@@ -494,6 +588,10 @@ export default function InboxPage() {
                                                 <div className="flex gap-1 ml-auto">
                                                     {!showCc && <Button variant="ghost" size="sm" className="h-6 text-xs text-slate-400 hover:text-slate-600" onClick={() => setShowCc(true)}>Cc</Button>}
                                                     {!showBcc && <Button variant="ghost" size="sm" className="h-6 text-xs text-slate-400 hover:text-slate-600" onClick={() => setShowBcc(true)}>CCN</Button>}
+                                                    <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1 self-center" />
+                                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-blue-100 text-blue-600 dark:hover:bg-blue-900/30 rounded-full" onClick={() => setIsReplyModalOpen(true)} title="Espandi A Schermo Intero">
+                                                        <Maximize2 className="w-3.5 h-3.5" />
+                                                    </Button>
                                                 </div>
                                                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full ml-1" onClick={() => setIsReplying(false)}>
                                                     <X className="w-4 h-4" />
