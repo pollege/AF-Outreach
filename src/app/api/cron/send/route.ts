@@ -64,8 +64,8 @@ export async function GET() {
                 const { data: validAccounts } = await supabase
                     .from('mail_accounts')
                     .select('*')
-                    .eq('status', 'active')
-                    .gt('daily_limit', supabase.raw('daily_sent')); // raw check: daily_limit > daily_sent (psuedo-code,supabase complex filter needs raw usually or filter in JS)
+                    .eq('status', 'active');
+                // .gt('daily_limit', supabase.raw('daily_sent')); // Removed: Complex filter done in JS below
 
                 // Supabase doesn't support col comparison easy in JS client filters sometimes. 
                 // Let's fetch active and filter in JS for MVP (assuming low # of accounts)

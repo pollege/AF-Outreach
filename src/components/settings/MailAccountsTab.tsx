@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -36,7 +36,7 @@ interface ProviderConfig {
     imap_host: string;
     imap_port: number;
     help_url: string | null;
-    icon: (className: string) => JSX.Element;
+    icon: (className: string) => React.ReactNode;
 }
 
 const PROVIDERS: Record<'gmail' | 'outlook' | 'custom', ProviderConfig> = {
