@@ -16,6 +16,7 @@ import {
 const menuItems = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/" },
     { icon: Megaphone, label: "Campagne", href: "/campaigns" },
+    { icon: Sparkles, label: "Campagne AI", href: "/ai-campaigns" },
     { icon: Users, label: "Leads", href: "/leads" }, // Global Leads view? Or maybe just keep inside campaigns
     { icon: Inbox, label: "Inbox", href: "/inbox" },
     { icon: Settings, label: "Impostazioni", href: "/settings" },
@@ -39,6 +40,8 @@ export function Sidebar() {
             <nav className="flex-1 space-y-2">
                 {menuItems.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+                    const isAI = item.href === '/ai-campaigns';
+
                     return (
                         <Link
                             key={item.href}
@@ -50,11 +53,21 @@ export function Sidebar() {
                                     : "text-slate-400 hover:text-white hover:bg-white/5"
                             )}
                         >
-                            <item.icon className={cn("w-5 h-5", isActive ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400")} />
+                            <item.icon className={cn(
+                                "w-5 h-5 transition-colors",
+                                isActive
+                                    ? (isAI ? "text-purple-400" : "text-blue-400")
+                                    : (isAI ? "text-slate-400 group-hover:text-purple-400" : "text-slate-400 group-hover:text-blue-400")
+                            )} />
                             <span className="font-medium">{item.label}</span>
 
                             {isActive && (
-                                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-500 rounded-r-full shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
+                                <div className={cn(
+                                    "absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-r-full",
+                                    isAI
+                                        ? "bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]"
+                                        : "bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                                )} />
                             )}
                         </Link>
                     );
@@ -64,7 +77,7 @@ export function Sidebar() {
             {/* Footer / User Profile */}
             <div className="mt-auto space-y-4">
                 <div className="pt-4 border-t border-white/10">
-                    <button className="flex items-center gap-3 px-4 py-3 w-full rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors">
+                    <button className="flex items-center gap-3 px-4 py-3 w-full rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors cursor-pointer">
                         <LogOut className="w-5 h-5" />
                         <span className="font-medium">Logout</span>
                     </button>

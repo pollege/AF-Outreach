@@ -6,11 +6,40 @@ CREATE TYPE campaign_status AS ENUM ('draft', 'active', 'paused', 'completed');
 CREATE TYPE automation_mode AS ENUM ('review', 'auto');
 CREATE TYPE lead_status AS ENUM ('new', 'researched', 'message_generated', 'queued', 'sent', 'opened', 'replied', 'qualified', 'bounced', 'unsubscribed');
 CREATE TYPE lead_classification AS ENUM ('hot', 'warm', 'cold', 'not_interested');
-CREATE TYPE message_type AS ENUM ('initial', 'follow_up_1', 'follow_up_2', 'break_up');
+CREATE TYPE message_type AS ENUM ('initial', 'follow_up_1', 'follow_up_2', 'break_up', 'inbound');
 CREATE TYPE message_status AS ENUM ('draft', 'queued', 'sending', 'sent', 'opened', 'clicked', 'replied', 'failed', 'bounced', 'cancelled');
-CREATE TYPE email_provider AS ENUM ('gmail', 'sendgrid', 'resend', 'ses');
+CREATE TYPE email_provider AS ENUM ('gmail', 'sendgrid', 'resend', 'ses', 'smtp');
 
 -- 2. TABLES
+
+-- mail_accounts (New Phase 5)
+CREATE TABLE mail_accounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email TEXT NOT NULL,
+    from_name TEXT,
+    
+    -- SMTP (Sending)
+    smtp_host TEXT,
+    smtp_port INTEGER,
+    smtp_user TEXT,
+    smtp_pass TEXT, -- Encryption handled app-side or via RLS if needed
+    smtp_secure BOOLEAN DEFAULT true,
+    
+    -- IMAP (Receiving)
+    imap_host TEXT,
+    imap_port INTEGER,
+    imap_user TEXT,
+    imap_pass TEXT,
+    
+    -- Limits & Status
+    daily_limit INTEGER DEFAULT 50,
+    daily_sent INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active', -- active, disconnected, error
+    error_message TEXT,
+    
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- unsubscribe_list
 CREATE TABLE unsubscribe_list (
@@ -47,8 +76,11 @@ CREATE TABLE campaigns (
     email_template JSONB, -- {subject_template, body_template, tone, max_length}
     automation_mode automation_mode DEFAULT 'review',
     follow_up_sequence JSONB DEFAULT '[]'::JSONB, -- [{delay_days: 4, type: "follow_up_1"}]
-    sending_limits JSONB, -- {hourly, daily}
+    sending_limits JSONB, -- {hourly, daily, daily_limit, hourly_limit, start_time, end_time}
+    sender_account_id UUID REFERENCES mail_accounts(id), -- NULL = Auto/Rotation, Value = Specific Account
     tracking_enabled BOOLEAN DEFAULT true,
+    enrichment_enabled BOOLEAN DEFAULT false, -- Enable AI Web Search Enrichment
+    enrichment_config JSONB DEFAULT '{"type": "generic"}'::JSONB, -- {type: "generic"|"news"|"pain_points", custom_query: ""}
     status campaign_status DEFAULT 'draft',
     stats JSONB DEFAULT '{"sent": 0, "opened": 0, "clicked": 0, "replied": 0, "qualified": 0, "bounced": 0, "unsubscribed": 0}'::JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -104,7 +136,11 @@ CREATE TABLE leads (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     last_contacted_at TIMESTAMPTZ,
-    last_interaction_at TIMESTAMPTZ
+    last_interaction_at TIMESTAMPTZ,
+
+    -- Multi-step Sequence Tracking
+    outreach_step INTEGER DEFAULT 0, -- 0 = Initial, 1 = Follow-up 1, etc.
+    next_action_at TIMESTAMPTZ DEFAULT NOW() -- When the next step should trigger
 );
 
 -- leads unique constraint: email per campaign or global? 

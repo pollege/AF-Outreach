@@ -2,13 +2,13 @@
 
 import { Bell } from "lucide-react";
 
-export function Header({ title }: { title: string }) {
+export function Header({ title, description }: { title: string, description?: string }) {
     return (
         <header className="flex items-center justify-between mb-8 pt-2">
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{title}</h1>
                 <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-                    {new Date().toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    {description || new Date().toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                 </p>
             </div>
 

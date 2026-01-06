@@ -38,6 +38,7 @@ export default function CampaignsPage() {
                 const { data, error } = await supabase
                     .from('campaigns')
                     .select('*')
+                    .neq('enrichment_enabled', true)
                     .order('created_at', { ascending: false });
 
                 if (error) throw error;

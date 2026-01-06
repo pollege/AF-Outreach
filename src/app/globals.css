@@ -1,24 +1,42 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   /* Custom Color Palette - Slate / Blue Gray */
-  --color-primary: #0f172a; /* Slate 900 */
-  --color-primary-foreground: #f8fafc; /* Slate 50 */
-  
-  --color-secondary: #e2e8f0; /* Slate 200 */
-  --color-secondary-foreground: #1e293b; /* Slate 800 */
-  
-  --color-accent: #3b82f6; /* Blue 500 */
+  --color-primary: #0f172a;
+  --color-primary-foreground: #f8fafc;
+  --color-secondary: #e2e8f0;
+  --color-secondary-foreground: #1e293b;
+  --color-accent: #3b82f6;
   --color-accent-foreground: #ffffff;
-  
   --color-glass-border: rgba(255, 255, 255, 0.2);
   --color-glass-bg: rgba(255, 255, 255, 0.7);
-  
   --radius-lg: 0.75rem;
   --radius-md: 0.5rem;
   --radius-sm: 0.25rem;
-  
   --font-sans: var(--font-inter);
+}
+
+/* Base Styles */
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #020617;
+    --foreground: #f8fafc;
+    --color-glass-border: rgba(255, 255, 255, 0.1);
+    --color-glass-bg: rgba(15, 23, 42, 0.6);
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), sans-serif;
+  @apply antialiased;
 }
 
 /* Custom Utilities for Glassmorphism */
@@ -38,25 +56,54 @@
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
 }
 
-/* Base Styles */
-:root {
-  --background: #f8fafc; /* Slate 50 */
-  --foreground: #0f172a; /* Slate 900 */
-}
+/* Custom Scrollbar Utility - More specific to ensure it overrides defaults */
+@utility custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #020617; /* Slate 950 */
-    --foreground: #f8fafc; /* Slate 50 */
-    
-    --color-glass-border: rgba(255, 255, 255, 0.1);
-    --color-glass-bg: rgba(15, 23, 42, 0.6);
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 10px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
   }
 }
 
-body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-inter), sans-serif;
-  @apply antialiased;
+@media (prefers-color-scheme: dark) {
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #334155;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+}
+
+/* Global scrollbar fallback */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+  }
 }

@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { Header } from "@/components/layout/Header";
 import { supabase } from "@/lib/supabase";
-import { Loader2, Search, Eye, Edit2 } from "lucide-react";
+import { Loader2, Search, Eye, Edit2, Users, Sparkles, Mail, Check } from "lucide-react";
 import { Input } from "@/components/ui/Input";
+import { toast } from "sonner";
 
 import { LeadEditor } from "@/components/leads/LeadEditor";
 import { LeadDetailsModal } from "@/components/leads/LeadDetailsModal";
@@ -84,11 +85,38 @@ export default function LeadsPage() {
         }
     };
 
+    const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
+    const [isSelectingCampaign, setIsSelectingCampaign] = useState(false);
+    const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
+
+    useEffect(() => {
+        // Fetch campaigns for the dropdown with type info
+        supabase.from('campaigns').select('id, name, enrichment_enabled, automation_mode').then(({ data }) => setAllCampaigns(data || []));
+    }, []);
+
+    const handleBulkAssign = async (campaignId: string) => {
+        const { error } = await supabase.from('leads').update({ campaign_id: campaignId }).in('id', selectedLeads);
+        if (error) {
+            toast.error("Errore assegnazione: " + error.message);
+        } else {
+            toast.success(`${selectedLeads.length} lead spostati nella campagna!`);
+            // Refresh leads
+            const { data } = await supabase
+                .from('leads')
+                .select('*, campaigns(name), messages(*)')
+                .order('created_at', { ascending: false })
+                .limit(100);
+            setLeads(data || []);
+            setSelectedLeads([]);
+            setIsSelectingCampaign(false);
+        }
+    };
+
     return (
         <div>
             <Header title="Tutti i Leads" />
 
-            <div className="flex gap-4 mb-6">
+            <div className="flex gap-4 mb-6 justify-between items-center">
                 <div className="relative w-full max-w-sm">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <Input
@@ -98,12 +126,54 @@ export default function LeadsPage() {
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
+
+                {selectedLeads.length > 0 && (
+                    <div className="flex bg-purple-50 dark:bg-purple-900/20 px-4 py-2 rounded-lg border border-purple-100 dark:border-purple-800 animate-in fade-in slide-in-from-bottom-2 items-center gap-4">
+                        <span className="text-sm text-purple-700 dark:text-purple-300 font-medium">{selectedLeads.length} selezionati</span>
+                        <div className="flex gap-2 relative">
+                            {isSelectingCampaign ? (
+                                <div className="absolute top-10 right-0 z-50 bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-white/10 rounded-xl p-2 w-64">
+                                    <h4 className="text-xs font-bold text-slate-500 px-2 py-1 mb-1">SPOSTA IN CAMPAGNA:</h4>
+                                    <div className="max-h-60 overflow-y-auto space-y-1">
+                                        {allCampaigns.map(c => (
+                                            <button
+                                                key={c.id}
+                                                onClick={() => handleBulkAssign(c.id)}
+                                                className="w-full text-left px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg truncate flex items-center gap-2 group"
+                                            >
+                                                {c.enrichment_enabled ? (
+                                                    <Sparkles className="w-3 h-3 text-purple-500" />
+                                                ) : (
+                                                    <Mail className="w-3 h-3 text-slate-400 group-hover:text-slate-600" />
+                                                )}
+                                                <span className={c.enrichment_enabled ? "text-purple-700 dark:text-purple-300 font-medium" : "text-slate-700 dark:text-slate-300"}>
+                                                    {c.name}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
+                            <button onClick={() => setIsSelectingCampaign(!isSelectingCampaign)} className="text-sm bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors shadow-sm">
+                                <Users className="w-4 h-4" /> Sposta in Campagna
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="glass dark:glass-dark rounded-2xl border border-white/20 dark:border-white/5 overflow-hidden">
                 <table className="w-full text-sm text-left">
                     <thead className="bg-slate-50 dark:bg-white/5 text-slate-500 border-b border-slate-200 dark:border-white/10">
                         <tr>
+                            <th className="px-6 py-4 w-4">
+                                <div
+                                    className={`w-4 h-4 rounded border cursor-pointer flex items-center justify-center transition-colors ${selectedLeads.length > 0 && selectedLeads.length === filteredLeads.length ? 'bg-purple-600 border-purple-600' : 'border-slate-300 dark:border-white/20 hover:border-purple-400'}`}
+                                    onClick={() => setSelectedLeads(selectedLeads.length === filteredLeads.length ? [] : filteredLeads.map(l => l.id))}
+                                >
+                                    {selectedLeads.length > 0 && selectedLeads.length === filteredLeads.length && <Check className="w-3 h-3 text-white" />}
+                                </div>
+                            </th>
                             <th className="px-6 py-4 font-medium">Nome</th>
                             <th className="px-6 py-4 font-medium">Azienda</th>
                             <th className="px-6 py-4 font-medium">Campagna</th>
@@ -114,17 +184,28 @@ export default function LeadsPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-white/10">
                         {loading ? (
-                            <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="animate-spin mx-auto text-blue-500" /></td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center"><Loader2 className="animate-spin mx-auto text-blue-500" /></td></tr>
                         ) : filteredLeads.length === 0 ? (
-                            <tr><td colSpan={6} className="p-8 text-center text-slate-500">Nessun lead trovato.</td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center text-slate-500">Nessun lead trovato.</td></tr>
                         ) : (
                             filteredLeads.map((lead) => (
                                 <tr
                                     key={lead.id}
-                                    className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group cursor-pointer"
+                                    className={`hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group cursor-pointer ${selectedLeads.includes(lead.id) ? 'bg-purple-50 dark:bg-purple-900/20' : ''}`}
                                     onMouseDown={(e) => setMouseDownPos({ x: e.clientX, y: e.clientY })}
                                     onClick={(e) => handleRowClick(lead, e)}
                                 >
+                                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                                        <div
+                                            className={`w-4 h-4 rounded border cursor-pointer flex items-center justify-center transition-colors ${selectedLeads.includes(lead.id) ? 'bg-purple-600 border-purple-600' : 'border-slate-300 dark:border-white/20 group-hover:border-purple-400'}`}
+                                            onClick={() => {
+                                                if (selectedLeads.includes(lead.id)) setSelectedLeads(selectedLeads.filter(id => id !== lead.id));
+                                                else setSelectedLeads([...selectedLeads, lead.id]);
+                                            }}
+                                        >
+                                            {selectedLeads.includes(lead.id) && <Check className="w-3 h-3 text-white" />}
+                                        </div>
+                                    </td>
                                     <td
                                         className="px-6 py-4 font-medium text-slate-900 dark:text-slate-100 cursor-default"
                                         onMouseDown={(e) => setMouseDownPos({ x: e.clientX, y: e.clientY })}
