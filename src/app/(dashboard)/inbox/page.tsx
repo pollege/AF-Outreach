@@ -346,29 +346,33 @@ export default function InboxPage() {
                         <div className="flex items-center justify-between px-1">
                             <h2 className="font-bold text-lg dark:text-white">Messaggi</h2>
                             <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500" onClick={() => fetchConversations()} title="Aggiorna">
-                                    <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
-                                </Button>
                                 <Button
                                     variant="ghost"
                                     size="icon"
                                     className="h-8 w-8 text-slate-500"
                                     onClick={async () => {
-                                        const id = toast.loading("Sync IMAP in corso...");
+                                        // Unified Sync Logic
+                                        const id = toast.loading("Sincronizzazione in corso...");
                                         try {
                                             const res = await fetch('/api/cron/sync-inbox');
                                             const data = await res.json();
                                             if (data.success) {
-                                                toast.success(`Trovati ${data.stats.matched} nuovi messaggi.`, { id });
+                                                const msg = data.stats.matched > 0
+                                                    ? `Trovati ${data.stats.matched} nuovi messaggi.`
+                                                    : "Nessun nuovo messaggio.";
+                                                toast.success(msg, { id });
                                                 fetchConversations();
                                             } else {
                                                 toast.error("Errore: " + data.error, { id });
                                             }
-                                        } catch (e) { toast.error("Offline", { id }); }
+                                        } catch (e) {
+                                            toast.error("Errore di connessione", { id });
+                                            fetchConversations(); // Fallback to local refresh
+                                        }
                                     }}
-                                    title="Forza Sync Ora"
+                                    title="Aggiorna e Sincronizza"
                                 >
-                                    <Mail className="w-4 h-4" />
+                                    <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
                                 </Button>
                             </div>
                         </div>
