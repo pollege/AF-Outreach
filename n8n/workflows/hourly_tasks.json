@@ -1,0 +1,102 @@
+{
+    "name": "Hourly AI Orchestrator",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 * * * *"
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                0,
+                0
+            ],
+            "id": "schedule-hourly",
+            "name": "Hourly Trigger"
+        },
+        {
+            "parameters": {
+                "url": "=https://YOUR-VERCEL-APP.vercel.app/api/cron/schedule?cron_secret=YOUR_SECRET",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                200,
+                0
+            ],
+            "id": "http-schedule",
+            "name": "Funnel Scheduler"
+        },
+        {
+            "parameters": {
+                "url": "=https://YOUR-VERCEL-APP.vercel.app/api/cron/enrich?cron_secret=YOUR_SECRET",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                400,
+                0
+            ],
+            "id": "http-enrich",
+            "name": "AI Enricher"
+        },
+        {
+            "parameters": {
+                "url": "=https://YOUR-VERCEL-APP.vercel.app/api/cron/generate?cron_secret=YOUR_SECRET",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                600,
+                0
+            ],
+            "id": "http-generate",
+            "name": "AI Generator"
+        }
+    ],
+    "connections": {
+        "Hourly Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Funnel Scheduler",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Funnel Scheduler": {
+            "main": [
+                [
+                    {
+                        "node": "AI Enricher",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Enricher": {
+            "main": [
+                [
+                    {
+                        "node": "AI Generator",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

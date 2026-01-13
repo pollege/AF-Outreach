@@ -11,7 +11,13 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Allow 60s timeout
 
-export async function GET() {
+export async function GET(req: Request) {
+    const { searchParams } = new URL(req.url);
+    const secret = searchParams.get('cron_secret');
+    if (secret !== process.env.CRON_SECRET) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     console.log("Starting Inbox Sync...");
     const stats = { accounts: 0, processed: 0, matched: 0, errors: 0 };
 

@@ -1,0 +1,60 @@
+{
+    "name": "Daily Reset Stats",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 0 * * *"
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                0,
+                0
+            ],
+            "id": "schedule-reset",
+            "name": "Midnight Trigger"
+        },
+        {
+            "parameters": {
+                "url": "=https://YOUR-VERCEL-APP.vercel.app/api/cron/reset-stats",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpQueryAuth",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                200,
+                0
+            ],
+            "id": "http-reset",
+            "name": "Call Reset API",
+            "credentials": {
+                "httpQueryAuth": {
+                    "id": "YOUR-CRON-SECRET-CRED-ID",
+                    "name": "Cron Secret"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Midnight Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Call Reset API",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

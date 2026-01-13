@@ -1,0 +1,77 @@
+{
+    "name": "Mail Transport Loop",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "*/15 * * * *"
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                0,
+                0
+            ],
+            "id": "schedule-15m",
+            "name": "15m Trigger"
+        },
+        {
+            "parameters": {
+                "url": "=https://YOUR-VERCEL-APP.vercel.app/api/cron/send?cron_secret=YOUR_SECRET",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                200,
+                0
+            ],
+            "id": "http-send",
+            "name": "Trigger Sending"
+        },
+        {
+            "parameters": {
+                "url": "=https://YOUR-VERCEL-APP.vercel.app/api/cron/sync-inbox?cron_secret=YOUR_SECRET",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                400,
+                0
+            ],
+            "id": "http-sync",
+            "name": "Trigger Sync"
+        }
+    ],
+    "connections": {
+        "15m Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Sending",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Trigger Sending": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Sync",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
