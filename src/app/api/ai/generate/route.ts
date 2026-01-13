@@ -29,7 +29,7 @@ export async function POST(req: Request) {
         if (leadId) {
             const { data, error } = await supabase
                 .from('leads')
-                .select('*')
+                .select('*, contacts(*)')
                 .eq('id', leadId)
                 .single();
             if (error) throw error;
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
         } else {
             const { data, error } = await supabase
                 .from('leads')
-                .select('*')
+                .select('*, contacts(*)')
                 .eq('campaign_id', campaignId)
                 .eq('status', 'researched')
                 .limit(20);
@@ -53,11 +53,14 @@ export async function POST(req: Request) {
 
         for (const lead of leads) {
             try {
+                // Access Global Contact
+                const contact = lead.contacts || lead;
+
                 // 3. Prepare Prompt
                 // Use enrichment data or fallback to basic fields
                 const leadInfo = lead.enrichment_data
                     ? JSON.stringify(lead.enrichment_data)
-                    : `Company: ${lead.company_name}, Role: ${lead.job_title}`;
+                    : `Company: ${contact.company_name}, Role: ${contact.job_title}`;
 
                 const systemPrompt = `You are a cold outreach expert. 
                 Goal: Write a personalized email based on the user's objective and the lead's enriched data.
@@ -67,9 +70,9 @@ export async function POST(req: Request) {
                 Max Length: ${template.max_length || 'Short (under 150 words)'}
                 
                 Output Format: JSON with keys "subject" and "body".
-                The body should be HTML formatted (use <p>, <br>, <strong>).
+                The body should be HTML formatted using only <p> tags for paragraphs. Do NOT use <br> tags between paragraphs.
                 Do not include placeholders like [Name], fill them in.
-                Lead Name: ${lead.first_name} ${lead.last_name}`;
+                Lead Name: ${contact.first_name} ${contact.last_name}`;
 
                 const userPrompt = `Lead Data: ${leadInfo}`;
 
@@ -79,7 +82,7 @@ export async function POST(req: Request) {
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userPrompt }
                     ],
-                    model: "gpt-4-turbo-preview", // or gpt-3.5-turbo if cost is concern
+                    model: "gpt-4o", // Strongest model for copywriting
                     response_format: { type: "json_object" }
                 });
 

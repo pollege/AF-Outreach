@@ -98,12 +98,36 @@ export async function GET() {
                     if (existing) continue; // Already imported
 
                     // 6. Match Lead (Smart Matching Strategy)
-                    const { data: leads } = await supabase
-                        .from('leads')
-                        .select('id, campaign_id, status')
-                        .eq('email', fromEmail);
+                    // A. Try matching Global Contact first
+                    let lead = null;
+                    const { data: contact } = await supabase
+                        .from('contacts')
+                        .select('id')
+                        .eq('email', fromEmail)
+                        .single();
 
-                    let lead = leads && leads.length > 0 ? leads[0] : null;
+                    if (contact) {
+                        // Find Leads for this contact
+                        const { data: leadsForContact } = await supabase
+                            .from('leads')
+                            .select('id, campaign_id, status')
+                            .eq('contact_id', contact.id)
+                            .order('created_at', { ascending: false }); // Get most recent
+
+                        if (leadsForContact && leadsForContact.length > 0) {
+                            lead = leadsForContact[0]; // Pick most recent campaign context
+                        }
+                    }
+
+                    // Legacy/Backup: Direct Lead Match (if no contact found or legacy import)
+                    if (!lead) {
+                        const { data: leads } = await supabase
+                            .from('leads')
+                            .select('id, campaign_id, status')
+                            .eq('email', fromEmail);
+
+                        if (leads && leads.length > 0) lead = leads[0];
+                    }
 
                     // Fallback: Smart Matching via In-Reply-To / References
                     if (!lead) {

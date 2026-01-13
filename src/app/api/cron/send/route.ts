@@ -1,10 +1,18 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-export async function GET() {
+// Vercel Config
+export const maxDuration = 60; // 1 minute should be enough for basic batches, but safer.
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: Request) {
     // Ideally this should be a POST to protect it, but GET is easier for simple cron services
 
     try {
+        const { searchParams } = new URL(req.url);
+        const campaignId = searchParams.get('campaign_id');
+        const forceMode = searchParams.get('force') === 'true';
+
         // 1. Check Limits (Simplified for MVP)
         // In real app, query 'email_settings' and count 'messages' sent in last hour.
         const { data: settings } = await supabase.from('email_settings').select('*').single();
@@ -15,28 +23,60 @@ export async function GET() {
         }
 
         // 2. Fetch Queued Messages
-        const { data: messages } = await supabase
+        let query = supabase
             .from('messages')
-            .select('*, leads(*), campaigns(*)')
-            .eq('status', 'queued')
+            .select('*, leads(*, contacts(*)), campaigns(*)') // Fetch Deeply Linked Contacts
             .limit(10); // Batch size
 
+        // Strict isolation: If campaign_id is provided, only send messages for that campaign
+        if (campaignId) {
+            query = query.eq('campaign_id', campaignId);
+        }
+
+        if (forceMode) {
+            // In Test/Force mode, pick up Drafts too
+            query = query.in('status', ['queued', 'draft']);
+        } else {
+            // Normal Cron mode: Only Queued
+            query = query.eq('status', 'queued');
+        }
+
+        const { data: messages } = await query;
+
         if (!messages || messages.length === 0) {
-            return NextResponse.json({ message: 'No queued messages' });
+            return NextResponse.json({ message: 'No queued messages (Try ?force=true to send drafts)' });
         }
 
         const sentIds = [];
+        const skipped = [];
 
         // 3. Process Batch
+        // FUTURE: For High Throughput (Pro SMTPs), switch this loop to await Promise.all(messages.map(...))
         for (const msg of messages) {
             const lead = msg.leads;
+            // Prefer Global Contact info, fallback to Legacy Lead info
+            const contact = lead.contacts || lead;
+
             const campaign = msg.campaigns;
 
             // --- SENDER SELECTION LOGIC ---
             let senderAccount = null;
 
-            // A. Check for Override
-            if (campaign?.sender_account_id) {
+            // A. Check for Message Specific Override (Manual Send)
+            if (msg.sender_account_id) {
+                const { data: directAcc } = await supabase
+                    .from('mail_accounts')
+                    .select('*')
+                    .eq('id', msg.sender_account_id)
+                    .single();
+
+                if (directAcc && directAcc.status === 'active') {
+                    senderAccount = directAcc;
+                }
+            }
+
+            // B. Check for Campaign Override (if no message specific)
+            if (!senderAccount && campaign?.sender_account_id) {
                 const { data: overrideAcc } = await supabase
                     .from('mail_accounts')
                     .select('*')
@@ -84,6 +124,7 @@ export async function GET() {
 
             if (!senderAccount) {
                 console.error(`Could not determine sender for msg ${msg.id}`);
+                skipped.push({ id: msg.id, reason: "No active sender account found (check Settings > Email Accounts)" });
                 continue;
             }
 
@@ -100,13 +141,13 @@ export async function GET() {
             // Prepare Payload for n8n
             const payload = {
                 message_id: msg.id,
-                to_email: lead.email,
-                to_name: `${lead.first_name} ${lead.last_name}`,
+                to_email: contact.email,
+                to_name: `${contact.first_name} ${contact.last_name}`,
                 subject: msg.subject,
                 body_html: msg.body + unsubscribeFooter + trackingPixel,
                 metadata: {
                     campaign: campaign?.name,
-                    company: lead.company_name
+                    company: contact.company_name
                 },
                 // INJECT DYNAMIC SMTP CREDENTIALS
                 smtp_config: {
@@ -129,24 +170,46 @@ export async function GET() {
                 });
 
                 if (n8nResponse.ok) {
-                    // Update status to 'sending'
-                    await supabase.from('messages').update({ status: 'sending', sent_at: new Date().toISOString() }).eq('id', msg.id);
+                    // Success Logic
+                    await supabase.from('messages').update({
+                        status: 'sent',
+                        sent_at: new Date().toISOString(),
+                        error_log: null // Clear previous errors if any
+                    }).eq('id', msg.id);
 
-                    // Increment Daily Sent Count for the used account
                     await supabase.rpc('increment_daily_sent', { account_id: senderAccount.id });
-                    // Or simple update if RPC not exists (Concurrency risk but okay for MVP)
                     await supabase.from('mail_accounts').update({ daily_sent: senderAccount.daily_sent + 1 }).eq('id', senderAccount.id);
 
                     sentIds.push(msg.id);
                 } else {
-                    console.error(`Failed to send to n8n for msg ${msg.id}`);
+                    // Logic for 500/400 from n8n (Handled Error)
+                    const errorMsg = `n8n Error ${n8nResponse.status}: ${await n8nResponse.text()}`;
+                    console.error(errorMsg);
+
+                    // SAVE TO DB
+                    await supabase.from('messages').update({
+                        status: 'failed',
+                        error_log: `(Sender: ${senderAccount.email}) ${errorMsg}`
+                    }).eq('id', msg.id);
+
+                    skipped.push({ id: msg.id, reason: errorMsg });
                 }
-            } catch (e) {
-                console.error(`Error sending to n8n:`, e);
+            } catch (e: any) {
+                // Logic for Network fail or Offline (Unhandled Error)
+                const netError = `n8n Offline/Network Error: ${e.message}`;
+                console.error(netError);
+
+                // SAVE TO DB
+                await supabase.from('messages').update({
+                    status: 'failed',
+                    error_log: netError
+                }).eq('id', msg.id);
+
+                skipped.push({ id: msg.id, reason: netError });
             }
         }
 
-        return NextResponse.json({ sent_count: sentIds.length, ids: sentIds });
+        return NextResponse.json({ sent_count: sentIds.length, ids: sentIds, skipped });
 
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });

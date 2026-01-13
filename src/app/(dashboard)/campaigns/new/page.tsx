@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { supabase } from "@/lib/supabase";
@@ -46,7 +47,10 @@ export default function NewCampaignPage() {
                     email_template: {
                         subject_template: formData.subject_template,
                         body_template: formData.body_template,
-                        mode: 'template', // Always template for standard
+                        // Sync legacy fields for compatibility
+                        subject: formData.subject_template,
+                        body: formData.body_template,
+                        mode: 'template',
                         tone: "professional",
                         max_length: 100
                     },
@@ -65,7 +69,7 @@ export default function NewCampaignPage() {
 
         } catch (err: any) {
             console.error("Error creating campaign:", err);
-            alert("Errore creazione campagna: " + err.message);
+            toast.error("Errore creazione campagna: " + err.message);
         } finally {
             setLoading(false);
         }

@@ -1,13 +1,7 @@
-
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
@@ -18,6 +12,16 @@ export async function GET(request: Request) {
     }
 
     try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+        const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
+        if (!supabaseServiceKey) {
+            console.error('CRITICAL: SUPABASE_SERVICE_KEY is missing. Unsubscribe will fail.');
+            return new NextResponse('Configuration Error', { status: 500 });
+        }
+
+        const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
         // 1. Fetch lead to get email
         const { data: lead, error: fetchError } = await supabase
             .from('leads')
@@ -36,11 +40,12 @@ export async function GET(request: Request) {
             .eq('id', lid);
 
         // 3. Add to Unsubscribe List (Global Blacklist)
+        // Check if already exists to avoid unique constraint error spam
         const { error: insertErr } = await supabase
             .from('unsubscribe_list')
-            .insert({ email: lead.email });
+            .upsert({ email: lead.email }, { onConflict: 'email' });
 
-        if (insertErr) console.log('Already unsubscribed globally?', insertErr);
+        if (insertErr) console.log('Error adding to global unsubscribe:', insertErr);
 
         // 4. Return HTML Page
         const html = `

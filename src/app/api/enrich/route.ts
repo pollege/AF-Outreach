@@ -4,9 +4,13 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Vercel Serverless Function Config
+export const maxDuration = 300; // 5 minutes (requires Pro plan usually, or 60s for Hobby)
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
     try {
-        const { leadId, campaignId } = await req.json();
+        const { leadId, campaignId, enrichmentConfig: overrideConfig } = await req.json();
 
         if (!campaignId) {
             return NextResponse.json({ error: 'Missing campaignId' }, { status: 400 });
@@ -18,7 +22,7 @@ export async function POST(req: Request) {
             // Priority: Single Lead (even if not 'new')
             const { data, error } = await supabase
                 .from('leads')
-                .select('*')
+                .select('*, contacts(*)')
                 .eq('id', leadId)
                 .single();
             if (error) throw error;
@@ -27,7 +31,7 @@ export async function POST(req: Request) {
             // Standard: Batch of 'new' leads
             const { data, error } = await supabase
                 .from('leads')
-                .select('*')
+                .select('*, contacts(*)')
                 .eq('campaign_id', campaignId)
                 .eq('status', 'new')
                 .limit(20);
@@ -44,12 +48,30 @@ export async function POST(req: Request) {
 
         // 2. Fetch Campaign for Settings
         const { data: campaign } = await supabase.from('campaigns').select('enrichment_config').eq('id', campaignId).single();
-        const config = campaign?.enrichment_config || { type: 'generic' };
+        const dbConfig = campaign?.enrichment_config || { type: 'generic' };
+
+        // MERGE: Priority to Override for 'type', but KEEP safeguards from DB
+        const config = {
+            ...dbConfig,
+            type: overrideConfig?.type || dbConfig.type,
+            extra_instructions: overrideConfig?.extra_instructions || dbConfig.extra_instructions
+            // excluded_domains are implicitly kept from dbConfig because we spread it first
+            // and we do NOT read them from overrideConfig to prevent bypassing.
+        };
 
         // 3. Process Leads
         const results = [];
         for (const lead of leads) {
             try {
+                // Access Global Contact
+                const contact = lead.contacts || lead;
+                const companyName = contact.company_name;
+
+                if (!companyName) {
+                    console.log(`Skipping lead ${lead.id}: No company name`);
+                    continue;
+                }
+
                 // 3a. SEARCH STRATEGY (Multi-Query for better coverage)
                 let queries: string[] = [];
                 const currentYear = new Date().getFullYear();
@@ -57,26 +79,26 @@ export async function POST(req: Request) {
                 if (config.type === 'news') {
                     // NEWS: Split into General News and Specific Projects/Events
                     queries = [
-                        `"${lead.company_name}" notizie recenti ${currentYear}`,
-                        `"${lead.company_name}" "comunicati stampa" "nuovi progetti" investimenti`
+                        `"${companyName}" notizie recenti ${currentYear}`,
+                        `"${companyName}" "comunicati stampa" "nuovi progetti" investimenti`
                     ];
                 } else if (config.type === 'pain_points') {
                     // PAIN POINTS (Strategic): Strategy/Growth and Market Challenges
                     queries = [
-                        `"${lead.company_name}" strategia crescita piani industriali`,
-                        `intervista AD "${lead.company_name}" sfide mercato obiettivi`
+                        `"${companyName}" strategia crescita piani industriali`,
+                        `intervista AD "${companyName}" sfide mercato obiettivi`
                     ];
                 } else if (config.type === 'risks') {
                     // RISKS (Aggressive): Problems, Reviews, Controversies
                     queries = [
-                        `"${lead.company_name}" problemi criticità recensioni negative`,
-                        `"${lead.company_name}" scandali cause legali ristrutturazione`
+                        `"${companyName}" problemi criticità recensioni negative`,
+                        `"${companyName}" scandali cause legali ristrutturazione`
                     ];
                 } else {
                     // GENERIC: General Info and Business Model
                     queries = [
-                        `"${lead.company_name}" chi siamo servizi prodotti`,
-                        `"${lead.company_name}" business model clienti target`
+                        `"${companyName}" chi siamo servizi prodotti`,
+                        `"${companyName}" business model clienti target`
                     ];
                 }
 
@@ -178,10 +200,10 @@ export async function POST(req: Request) {
                     }
 
                     const completion = await openai.chat.completions.create({
-                        model: "gpt-3.5-turbo-0125", // Fast & Cheap for summarization
+                        model: "gpt-4o-mini", // Better performance/cost ratio
                         messages: [
                             { role: "system", content: systemPrompt },
-                            { role: "user", content: `Search Results for ${lead.company_name}:\n${content}\n\n${userInstructions} Ensure valid JSON output and ITALIAN language.` }
+                            { role: "user", content: `Search Results for ${companyName}:\n${content}\n\n${userInstructions} Ensure valid JSON output and ITALIAN language.` }
                         ],
                         response_format: { type: "json_object" }
                     });

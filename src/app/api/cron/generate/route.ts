@@ -2,14 +2,24 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { openai } from '@/lib/openai';
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
-        // 1. Fetch 'researched' leads
-        const { data: leads, error } = await supabase
+        const { searchParams } = new URL(request.url);
+        const campaignId = searchParams.get('campaign_id');
+
+        // 1. Fetch leads ready for generation
+        // Ready means: 'researched' (All) OR 'new' (Standard Campaigns only)
+        let query = supabase
             .from('leads')
-            .select('*, campaigns(*)') // join campaign to get template
-            .eq('status', 'researched')
-            .limit(5);
+            .select('*, campaigns(*)')
+            .in('status', ['new', 'researched']);
+
+        // Strict isolation: If campaign_id is provided, only process leads for that campaign
+        if (campaignId) {
+            query = query.eq('campaign_id', campaignId);
+        }
+
+        const { data: leads, error } = await query.limit(10);
 
         if (error) throw error;
         if (!leads || leads.length === 0) {
@@ -20,38 +30,89 @@ export async function GET() {
 
         // 2. Process
         for (const lead of leads) {
-            const campaign = lead.campaigns; // joined data (may be array or object depending on relationship)
-            // Supabase join returns an object if 1:1 or N:1, but here lead -> campaign is N:1.
-            // However, often types need check. Assume 'campaigns' is the joined object.
+            const campaign = lead.campaigns;
+
+            // LOGIC CHECK:
+            // If lead is 'new' but campaign requires enrichment -> SKIP (Enricher should handle it)
+            if (lead.status === 'new' && campaign?.enrichment_enabled) {
+                continue;
+            }
+
+            // DUPLICATE CHECK: Skip if message already exists
+            const { data: existingMsg } = await supabase
+                .from('messages')
+                .select('id')
+                .eq('lead_id', lead.id)
+                .maybeSingle(); // Use maybeSingle to avoid 406 error if multiple exist
+
+            if (existingMsg) {
+                // Determine correct status (restore logic)
+                const shouldBeStatus = 'message_generated';
+                // Fix inconsistencies: ensure lead is marked as generated if msg exists
+                if (lead.status !== shouldBeStatus) {
+                    await supabase.from('leads').update({ status: shouldBeStatus }).eq('id', lead.id);
+                }
+                continue;
+            }
+
             const template = campaign?.email_template || {};
+            let content = { subject: "", body: "" };
 
-            // Prompt
-            const prompt = `
-       Sei un copywriter B2B esperto in italiano.
-       Scrivi un'email di cold outreach.
-       
-       Lead: ${lead.first_name} ${lead.last_name}, ${lead.job_title} @ ${lead.company_name}
-       Industry: ${lead.industry}
-       News: ${JSON.stringify(lead.enrichment_data?.recent_news)}
-       Pain Points: ${JSON.stringify(lead.enrichment_data?.pain_points)}
-       
-       Template Subject: ${template.subject_template || "Ciao {first_name}"}
-       Template Body: ${template.body_template || "..."}
-       
-       Genera un JSON: 
-       { 
-         "subject": "string (max 60 chars)", 
-         "body": "html string (keep it simple, <p>, <br>)" 
-       }
-       `;
+            if (!campaign?.enrichment_enabled) {
+                // STANDARD MODE: Simple variable replacement
+                const replaceVars = (str: string) => {
+                    if (!str) return "";
+                    return str
+                        .replace(/{first_name}/g, lead.first_name || "")
+                        .replace(/{last_name}/g, lead.last_name || "")
+                        .replace(/{company_name}/g, lead.company_name || "")
+                        .replace(/{job_title}/g, lead.job_title || "");
+                };
 
-            const completion = await openai.chat.completions.create({
-                model: "gpt-4o", // Better for creative writing
-                messages: [{ role: "user", content: prompt }],
-                response_format: { type: "json_object" }
-            });
+                content = {
+                    subject: replaceVars(template.subject_template || ""),
+                    body: replaceVars(template.body_template || "")
+                };
+            } else {
+                // AI MODE: Use GPT-4o
+                const prompt = `
+           Sei un copywriter B2B esperto in italiano.
+           Scrivi un'email di cold outreach.
+           
+           Lead: ${lead.first_name} ${lead.last_name}, ${lead.job_title} @ ${lead.company_name}
+           Industry: ${lead.industry}
+           News: ${JSON.stringify(lead.enrichment_data?.recent_news)}
+           Pain Points: ${JSON.stringify(lead.enrichment_data?.pain_points)}
+           
+           Template Subject: ${template.subject_template || "Ciao {first_name}"}
+           Template Body: ${template.body_template || "..."}
+           
+           Genera un JSON: 
+           { 
+             "subject": "string (max 60 chars)", 
+             "body": "html string (keep it simple, <p>, <br>)" 
+           }
+           `;
 
-            const content = JSON.parse(completion.choices[0].message.content || '{}');
+                const completion = await openai.chat.completions.create({
+                    model: "gpt-4o",
+                    messages: [{ role: "user", content: prompt }],
+                    response_format: { type: "json_object" }
+                });
+
+                content = JSON.parse(completion.choices[0].message.content || '{}');
+            }
+
+            // 3. Save Message
+            // DETERMINE STATUS:
+            // 1. Standard Campaign (No Enrichment) -> ALWAYS 'queued' (No review needed for fixed templates)
+            // 2. AI Campaign -> Check automation_mode ('auto' -> 'queued', 'manual' -> 'draft')
+            let initialStatus = 'draft';
+            if (!campaign?.enrichment_enabled) {
+                initialStatus = 'queued';
+            } else {
+                initialStatus = campaign?.automation_mode === 'auto' ? 'queued' : 'draft';
+            }
 
             // 3. Save Message
             const { data: msg, error: msgError } = await supabase
@@ -62,8 +123,8 @@ export async function GET() {
                     type: 'initial',
                     subject: content.subject,
                     body: content.body,
-                    status: campaign?.automation_mode === 'auto' ? 'queued' : 'draft',
-                    personalization_used: lead.enrichment_data
+                    status: initialStatus,
+                    personalization_used: campaign?.enrichment_enabled ? lead.enrichment_data : null
                 })
                 .select()
                 .single();

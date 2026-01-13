@@ -89,8 +89,8 @@ body {
 
 /* Global scrollbar fallback */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -99,11 +99,27 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
-  border-radius: 4px;
+  border-radius: 6px;
+  border: 2px solid var(--background);
+  /* Creates a padding effect */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 @media (prefers-color-scheme: dark) {
   ::-webkit-scrollbar-thumb {
     background: #334155;
+    border-color: var(--background);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+
+  /* Corner for dual scrollbars */
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }

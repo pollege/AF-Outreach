@@ -8,6 +8,7 @@ import { Loader2, Plus, Trash2, Edit2, CheckCircle, AlertTriangle, RefreshCw, Ma
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { differenceInDays, parseISO } from "date-fns";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 interface MailAccount {
     id: string;
@@ -27,6 +28,7 @@ interface MailAccount {
     daily_sent: number;
     error_message?: string;
     provider_type?: 'gmail' | 'outlook' | 'custom';
+    last_reset_at?: string;
 }
 
 interface ProviderConfig {
@@ -87,6 +89,7 @@ export function MailAccountsTab() {
     const [testResult, setTestResult] = useState<any>(null);
     const [testing, setTesting] = useState(false);
     const [testingId, setTestingId] = useState<string | null>(null);
+    const [accountToDelete, setAccountToDelete] = useState<string | null>(null);
 
     // Form State
     const [selectedProvider, setSelectedProvider] = useState<'gmail' | 'outlook' | 'custom'>('gmail');
@@ -143,7 +146,7 @@ export function MailAccountsTab() {
 
     const fetchAccounts = async () => {
         setLoading(true);
-        const { data, error } = await supabase.from('mail_accounts').select('*').order('created_at', { ascending: false });
+        const { data, error } = await supabase.from('mail_accounts').select('*, last_reset_at').order('created_at', { ascending: false });
         if (data) setAccounts(data);
         setLoading(false);
     };
@@ -230,11 +233,16 @@ export function MailAccountsTab() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Eliminare questo account?")) return;
-        await supabase.from('mail_accounts').delete().eq('id', id);
+    const handleDeleteClick = (id: string) => {
+        setAccountToDelete(id);
+    };
+
+    const confirmDelete = async () => {
+        if (!accountToDelete) return;
+        await supabase.from('mail_accounts').delete().eq('id', accountToDelete);
         await fetchAccounts();
         toast.success("Account eliminato");
+        setAccountToDelete(null); // Close the modal after deletion
     };
 
     const StatusIcon = ({ status }: { status: string }) => {
@@ -250,6 +258,15 @@ export function MailAccountsTab() {
 
     return (
         <div className="space-y-8">
+            <ConfirmModal
+                isOpen={!!accountToDelete}
+                onClose={() => setAccountToDelete(null)}
+                onConfirm={confirmDelete}
+                title="Elimina Account"
+                description="Sei sicuro? Non potrai più usare questo indirizzo per inviare campagne."
+                variant="destructive"
+                confirmText="Elimina"
+            />
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
@@ -276,6 +293,17 @@ export function MailAccountsTab() {
                     // If the user set a limit much higher than recommended, assume they skipped warmup
                     // Badge shows if strictly in warm-up period, regardless of limit setting
                     const effectiveIsWarm = isWarm;
+
+                    // --- VISUAL SAFEGUARD ---
+                    // Since we use a nightly cron to reset, if the user visits BEFORE the cron runs (or if cron fails),
+                    // they might see old data (e.g. 10/10 sent yesterday).
+                    // We check `last_reset_at`. If it's NOT today, we assume 0 sent for display purposes.
+                    const lastReset = acc.last_reset_at ? parseISO(acc.last_reset_at) : null;
+                    const isResetToday = lastReset ? differenceInDays(new Date(), lastReset) === 0 : false;
+
+                    // If no last_reset_at, assume 0. If old date, assume 0.
+                    const displaySent = isResetToday ? acc.daily_sent : 0;
+                    // ------------------------
 
                     return (
                         <div key={acc.id} className="glass dark:glass-dark group relative p-6 rounded-2xl border border-white/20 dark:border-white/5 hover:border-blue-500/30 transition-all flex flex-col justify-between h-full">
@@ -333,7 +361,7 @@ export function MailAccountsTab() {
                                 <Button size="icon" variant="ghost" onClick={() => handleOpenModal(acc)}>
                                     <Edit2 className="w-3.5 h-3.5 text-slate-400" />
                                 </Button>
-                                <Button size="icon" variant="ghost" onClick={() => handleDelete(acc.id)} className="hover:text-red-500">
+                                <Button size="icon" variant="ghost" onClick={() => handleDeleteClick(acc.id)} className="hover:text-red-500">
                                     <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
                             </div>

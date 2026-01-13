@@ -10,15 +10,19 @@ import {
     Inbox,
     Settings,
     LogOut,
-    Sparkles
+    Sparkles,
+    Activity,
+    BarChart3
 } from "lucide-react";
 
 const menuItems = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/" },
     { icon: Megaphone, label: "Campagne", href: "/campaigns" },
     { icon: Sparkles, label: "Campagne AI", href: "/ai-campaigns" },
+    { icon: BarChart3, label: "Statistiche", href: "/stats" },
     { icon: Users, label: "Leads", href: "/leads" }, // Global Leads view? Or maybe just keep inside campaigns
     { icon: Inbox, label: "Inbox", href: "/inbox" },
+    { icon: Activity, label: "Registro Invii", href: "/logs" },
     { icon: Settings, label: "Impostazioni", href: "/settings" },
 ];
 

@@ -17,8 +17,9 @@ interface SequenceStep {
 
 export function SequenceEditor({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any) => void }) {
     // Initial Email (Step 0)
-    const [initialSubject, setInitialSubject] = useState(campaign.email_template?.subject || "");
-    const [initialBody, setInitialBody] = useState(campaign.email_template?.body || "");
+    // Fix: Prioritize 'subject_template' which is what create page saves. Fallback to 'subject' for legacy.
+    const [initialSubject, setInitialSubject] = useState(campaign.email_template?.subject_template || campaign.email_template?.subject || "");
+    const [initialBody, setInitialBody] = useState(campaign.email_template?.body_template || campaign.email_template?.body || "");
 
     // Follow-ups (Steps 1+)
     const [sequence, setSequence] = useState<SequenceStep[]>(campaign.follow_up_sequence || []);
@@ -54,7 +55,14 @@ export function SequenceEditor({ campaign, onUpdate }: { campaign: any, onUpdate
         setSaving(true);
 
         const updatedCampaign = {
-            email_template: { ...campaign.email_template, subject: initialSubject, body: initialBody },
+            // Update both sets of keys to ensure compatibility everywhere
+            email_template: {
+                ...campaign.email_template,
+                subject: initialSubject,
+                body: initialBody,
+                subject_template: initialSubject,
+                body_template: initialBody
+            },
             follow_up_sequence: sequence
         };
 

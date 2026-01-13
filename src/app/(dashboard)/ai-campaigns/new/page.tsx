@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { supabase } from "@/lib/supabase";
@@ -71,7 +72,7 @@ export default function NewAICampaignPage() {
 
         } catch (err: any) {
             console.error("Error creating AI campaign:", err);
-            alert("Errore creazione campagna AI: " + err.message);
+            toast.error("Errore creazione campagna AI: " + err.message);
         } finally {
             setLoading(false);
         }

@@ -6,13 +6,14 @@ import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { Loader2, Upload, Users, BarChart3, Settings, Search, Timer, Sparkles, Bot, BrainCircuit, AlertTriangle, Target, Newspaper } from "lucide-react";
+import { Loader2, Upload, Users, BarChart3, Settings, Search, Timer, Sparkles, Bot, BrainCircuit, AlertTriangle, Target, Newspaper, Info } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import Papa from "papaparse";
 import { LeadEditor } from "@/components/leads/LeadEditor";
 import { LeadDetailsModal } from "@/components/leads/LeadDetailsModal";
 import { EnrichmentSettingsModal } from "@/components/campaigns/EnrichmentSettingsModal";
-import { Edit2, Eye } from "lucide-react";
+import { ContactPickerModal } from "@/components/leads/ContactPickerModal";
+import { Edit2, Eye, Database } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AICampaignDetailPage() {
@@ -134,6 +135,45 @@ export default function AICampaignDetailPage() {
                         {tab.label}
                     </button>
                 ))}
+            </div>
+
+            {/* AI Workflow Info Box */}
+            {/* AI Workflow Info Box */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                    <BrainCircuit className="w-24 h-24 text-blue-500" />
+                </div>
+                <div className="flex gap-4 relative z-10">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg h-fit">
+                        <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-blue-900 dark:text-blue-100 mb-1">Workflow AI Guidato</h3>
+                        <p className="text-sm text-blue-700 dark:text-blue-300 mb-3 max-w-3xl">
+                            Automatizza la personalizzazione delle tue campagne in 3 passaggi:
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-white/60 dark:bg-black/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800/50">
+                                <div className="text-xs font-bold text-blue-800 dark:text-blue-300 uppercase mb-1">1. Importa & Arricchisci</div>
+                                <p className="text-xs text-blue-600 dark:text-blue-400">
+                                    Carica i tuoi lead. L'AI cercherà in autonomia news, informazioni aziendali e persone chiave per ogni contatto.
+                                </p>
+                            </div>
+                            <div className="bg-white/60 dark:bg-black/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800/50">
+                                <div className="text-xs font-bold text-blue-800 dark:text-blue-300 uppercase mb-1">2. Generazione Smart</div>
+                                <p className="text-xs text-blue-600 dark:text-blue-400">
+                                    Crea messaggi iper-personalizzati basati sui dati raccolti. In modalità <em>Revisione</em> puoi controllarli prima dell'invio.
+                                </p>
+                            </div>
+                            <div className="bg-white/60 dark:bg-black/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800/50">
+                                <div className="text-xs font-bold text-blue-800 dark:text-blue-300 uppercase mb-1">3. Controllo & Invio</div>
+                                <p className="text-xs text-blue-600 dark:text-blue-400">
+                                    Revisiona le bozze ed approvale con un click. Il sistema gestirà l'invio ottimizzato per evitare lo spam.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             {/* Content */}
@@ -292,7 +332,38 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
     const [enriching, setEnriching] = useState(false);
     const [enrichingId, setEnrichingId] = useState<string | null>(null);
     const [generating, setGenerating] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
     const router = useRouter();
+
+    const handleImportFromDB = async (contacts: any[]) => {
+        const newLeads = contacts.map(contact => ({
+            campaign_id: campaignId,
+            contact_id: contact.id,
+            status: 'new',
+            lead_score: 0,
+            first_name: contact.first_name,
+            last_name: contact.last_name,
+            email: contact.email,
+            company_name: contact.company_name,
+            job_title: contact.job_title,
+            linkedin_url: contact.linkedin_url
+        }));
+
+        const { error } = await supabase.from('leads').insert(newLeads);
+
+        if (error) {
+            console.error('Import error details:', JSON.stringify(error, null, 2));
+            toast.error("Errore importazione: " + (error.message || "Errore sconosciuto"));
+        } else {
+            const { data: newLeads } = await supabase
+                .from('leads')
+                .select('*, messages(*)')
+                .eq('campaign_id', campaignId)
+                .order('created_at', { ascending: false });
+            setLeads(newLeads || []);
+            toast.success(`Importati ${contacts.length} leads`);
+        }
+    };
 
     const handleEnrich = async () => {
         setEnriching(true);
@@ -369,7 +440,7 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
         fetchLeads();
     }, [campaignId]);
 
-    const handleSingleEnrich = async (lead: any) => {
+    const handleSingleEnrich = async (lead: any, overrideConfig?: any) => {
         setEnrichingId(lead.id);
         try {
             // 1. Enrich
@@ -377,7 +448,11 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
             const enrichRes = await fetch('/api/enrich', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ campaignId, leadId: lead.id })
+                body: JSON.stringify({
+                    campaignId,
+                    leadId: lead.id,
+                    enrichmentConfig: overrideConfig // Pass override config
+                })
             });
             const enrichData = await enrichRes.json();
             if (enrichData.brave_credits) {
@@ -618,8 +693,15 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
             </div>
 
             <LeadEditor lead={editingLead} isOpen={!!editingLead} onClose={() => setEditingLead(null)} onSave={handleSaveLead} />
-            <LeadDetailsModal lead={viewingLead} isOpen={!!viewingLead} onClose={() => setViewingLead(null)} onLeadUpdate={handleSaveLead} />
-        </div>
+            <LeadDetailsModal
+                lead={viewingLead}
+                isOpen={!!viewingLead}
+                onClose={() => setViewingLead(null)}
+                onLeadUpdate={handleSaveLead}
+                enrichmentEnabled={true}
+                onEnrich={handleSingleEnrich}
+            />
+        </div >
     )
 }
 
@@ -628,6 +710,12 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
     const [file, setFile] = useState<File | null>(null);
     const [preview, setPreview] = useState<any[]>([]);
     const [uploading, setUploading] = useState(false);
+    const [progress, setProgress] = useState(0);
+
+    // DB Import State
+    const [isDbImportOpen, setIsDbImportOpen] = useState(false);
+    const [existingContactIds, setExistingContactIds] = useState<string[]>([]);
+    const [loadingExisting, setLoadingExisting] = useState(false);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0];
@@ -644,43 +732,216 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
         }
     };
 
+    const handleOpenDbImport = async () => {
+        setLoadingExisting(true);
+        // Fetch existing lead contact IDs to filter selection
+        const { data } = await supabase.from('leads').select('contact_id').eq('campaign_id', campaignId);
+        if (data) {
+            setExistingContactIds(data.map(l => l.contact_id).filter(Boolean));
+        }
+        setLoadingExisting(false);
+        setIsDbImportOpen(true);
+    };
+
+    const handleImportFromDB = async (contacts: any[]) => {
+        const newLeads = contacts.map(contact => ({
+            campaign_id: campaignId,
+            contact_id: contact.id,
+            status: 'new',
+            lead_score: 0,
+            first_name: contact.first_name,
+            last_name: contact.last_name,
+            email: contact.email,
+            company_name: contact.company_name,
+            job_title: contact.job_title,
+            linkedin_url: contact.linkedin_url
+        }));
+
+        const { error } = await supabase.from('leads').insert(newLeads);
+
+        if (error) {
+            console.error('Import error details:', JSON.stringify(error, null, 2));
+            toast.error("Errore importazione: " + (error.message || "Errore sconosciuto"));
+        } else {
+            toast.success(`Importati ${contacts.length} leads dal Database`);
+            onImportSuccess();
+        }
+    };
+
     const handleUpload = async () => {
         if (!file) return;
         setUploading(true);
+        setProgress(0);
 
         try {
             Papa.parse(file, {
                 header: true,
                 skipEmptyLines: true,
                 complete: async (results) => {
-                    const leads = results.data.map((row: any) => ({
-                        campaign_id: campaignId,
-                        first_name: row.first_name || row.FirstName,
-                        last_name: row.last_name || row.LastName,
-                        email: row.email || row.Email,
-                        company_name: row.company_name || row.Company,
-                        job_title: row.job_title || row.JobTitle,
-                        linkedin_url: row.linkedin_url || row.LinkedIn,
-                        status: 'new'
-                    })).filter((l: any) => l.email && l.company_name);
+                    const totalRows = results.data.length;
 
-                    if (leads.length === 0) {
-                        toast.warning("Nessun lead valido trovato nel CSV.");
+                    // 1. Pre-process CSV rows
+                    const processedRows = results.data.map((row: any) => {
+                        // Normalize Keys
+                        const normalizedRow: any = {};
+                        Object.keys(row).forEach(key => {
+                            const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            normalizedRow[cleanKey] = row[key];
+                        });
+
+                        const findVal = (variations: string[]) => {
+                            for (const v of variations) {
+                                if (normalizedRow[v]) return normalizedRow[v];
+                            }
+                            return null;
+                        };
+
+                        const email = findVal(['email', 'mail', 'e-mail']);
+                        if (!email) return null; // Skip invalid rows
+
+                        return {
+                            email: email,
+                            first_name: findVal(['firstname', 'first_name', 'nome', 'name']),
+                            last_name: findVal(['lastname', 'last_name', 'cognome', 'surname']),
+                            company_name: findVal(['companyname', 'company_name', 'company', 'azienda']),
+                            job_title: findVal(['jobtitle', 'job_title', 'role', 'position', 'title']),
+                            linkedin_url: findVal(['linkedin', 'linkedinurl', 'linkedin_url', 'website']),
+
+                            // Custom Fields for Contact
+                            raw_row: row
+                        };
+                    }).filter(r => r !== null);
+
+                    if (processedRows.length === 0) {
+                        toast.error("Nessun lead valido trovato (Email mancanti).");
                         setUploading(false);
                         return;
                     }
 
-                    const { error } = await supabase.from('leads').insert(leads);
+                    // 2. Prepare Contacts Payload (Unique Emails)
+                    // We use a Map to keep the "last" occurrence or just keys
+                    const contactsMap = new Map();
+                    const customFieldKeysToIgnore = ['firstname', 'first_name', 'nome', 'name', 'lastname', 'last_name', 'cognome', 'surname', 'email', 'mail', 'e-mail', 'companyname', 'company_name', 'company', 'azienda', 'jobtitle', 'job_title', 'role', 'position', 'title', 'linkedin', 'linkedinurl', 'linkedin_url'];
 
-                    if (error) {
-                        toast.error("Errore importazione: " + error.message);
-                    } else {
-                        toast.success(`Importati ${leads.length} leads!`, {
-                            description: "L'AI inizierà a processarli appena la campagna sarà attiva."
+                    processedRows.forEach((p: any) => {
+                        // Extract custom fields for this specific contact
+                        const customFields: any = {};
+                        Object.keys(p.raw_row).forEach(originalKey => {
+                            const cleanKey = originalKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            if (!customFieldKeysToIgnore.includes(cleanKey)) {
+                                customFields[originalKey] = p.raw_row[originalKey];
+                            }
                         });
-                        onImportSuccess();
+
+                        contactsMap.set(p.email, {
+                            email: p.email,
+                            first_name: p.first_name,
+                            last_name: p.last_name,
+                            company_name: p.company_name,
+                            job_title: p.job_title,
+                            linkedin_url: p.linkedin_url,
+                            custom_fields: customFields
+                        });
+                    });
+
+                    const uniqueContacts = Array.from(contactsMap.values());
+
+                    // 3. Upsert Contacts & Fetch IDs
+                    // Chunking for contacts
+                    const CHUNK_SIZE = 50;
+                    const contactChunks = [];
+                    for (let i = 0; i < uniqueContacts.length; i += CHUNK_SIZE) {
+                        contactChunks.push(uniqueContacts.slice(i, i + CHUNK_SIZE));
                     }
+
+                    let processedCount = 0;
+
+                    // We need a map of Email -> UUID to link later
+                    const emailToIdMap = new Map<string, string>();
+
+                    for (const chunk of contactChunks) {
+                        // Upsert contacts
+                        const { error: upsertError } = await supabase
+                            .from('contacts')
+                            .upsert(chunk, { onConflict: 'email', ignoreDuplicates: false }); // Update existing contacts with new info? or true to keep old? let's update (false)
+
+                        if (upsertError) {
+                            console.error("Contact Upsert Error", upsertError);
+                            // Continue?
+                        }
+
+                        // Fetch IDs for this chunk (we need to fetch by email)
+                        const emails = chunk.map((c: any) => c.email);
+                        const { data: fetchedContacts } = await supabase
+                            .from('contacts')
+                            .select('id, email')
+                            .in('email', emails);
+
+                        if (fetchedContacts) {
+                            fetchedContacts.forEach((fan: any) => {
+                                emailToIdMap.set(fan.email, fan.id);
+                            });
+                        }
+
+                        processedCount += chunk.length;
+                        setProgress(Math.round((processedCount / (uniqueContacts.length * 2)) * 100)); // First half of progress
+                    }
+
+                    // 4. Insert Campaign Leads (Links)
+                    const leadsPayload = processedRows.map((p: any) => {
+                        const contactId = emailToIdMap.get(p.email);
+                        if (!contactId) return null;
+
+                        return {
+                            campaign_id: campaignId,
+                            contact_id: contactId,
+                            status: 'new',
+                            // We duplicate these for now for backward compatibility, but eventually we'll remove them
+                            email: p.email,
+                            first_name: p.first_name,
+                            last_name: p.last_name,
+                            company_name: p.company_name
+                        };
+                    }).filter((l: any) => l !== null);
+
+                    const leadsChunks = [];
+                    for (let i = 0; i < leadsPayload.length; i += CHUNK_SIZE) {
+                        leadsChunks.push(leadsPayload.slice(i, i + CHUNK_SIZE));
+                    }
+
+                    let insertedLeadsCount = 0;
+                    let skippedCount = 0;
+
+                    for (const chunk of leadsChunks) {
+                        const { data, error } = await supabase
+                            .from('leads')
+                            .upsert(chunk, { onConflict: 'email, campaign_id', ignoreDuplicates: true })
+                            .select();
+
+                        if (error) console.error("Leads Insert Error", error);
+                        if (data) insertedLeadsCount += data.length;
+
+                        processedCount += chunk.length;
+                        // Normalize progress to max 100
+                        const currentProg = Math.round(50 + (processedCount / (uniqueContacts.length * 2)) * 50);
+                        setProgress(Math.min(currentProg, 100));
+                    }
+
                     setUploading(false);
+                    skippedCount = totalRows - insertedLeadsCount;
+
+                    toast.success(
+                        ((<div className="flex flex-col gap-1">
+                            <span className="font-semibold">Importazione completata (Global Architecture)!</span>
+                            <span className="text-xs">
+                                ✅ {insertedLeadsCount} collegati
+                                <br />
+                                ⚠️ {skippedCount} già presenti
+                            </span>
+                        </div>) as any),
+                        { duration: 5000 }
+                    );
+                    onImportSuccess();
                 }
             });
         } catch (e: any) {
@@ -690,22 +951,62 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
     };
 
     return (
-        <div className="max-w-xl mx-auto space-y-6">
-            <div className="border-2 border-dashed border-purple-300 dark:border-purple-700/50 bg-purple-50/50 dark:bg-purple-900/10 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors cursor-pointer relative">
-                <input type="file" accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
-                <Upload className="w-10 h-10 text-purple-400 mb-4" />
-                <h3 className="font-semibold text-lg text-purple-900 dark:text-purple-100">Carica CSV per Arricchimento AI</h3>
-                <p className="text-sm text-purple-500 mt-2">I lead verranno processati dall'AI uno per uno.</p>
-                {file && <p className="mt-4 font-medium text-purple-600">{file.name}</p>}
+        <div className="max-w-4xl mx-auto space-y-8">
+            <h2 className="text-xl font-semibold text-slate-800 dark:text-white mb-6">Scegli la fonte dei dati</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Option 2: Database */}
+                <div
+                    onClick={handleOpenDbImport}
+                    className="group border-2 border-dashed border-indigo-200 dark:border-indigo-800/50 bg-indigo-50/30 dark:bg-indigo-900/10 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-500"
+                >
+                    <div className="p-4 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 mb-4 group-hover:scale-110 transition-transform">
+                        {loadingExisting ? <Loader2 className="w-8 h-8 animate-spin" /> : <Database className="w-8 h-8" />}
+                    </div>
+                    <h3 className="font-semibold text-lg text-indigo-900 dark:text-indigo-100">Da Database Contatti</h3>
+                    <p className="text-sm text-indigo-500/80 mt-2 max-w-xs">
+                        Seleziona dai contatti già presenti nel tuo CRM (o importati da estensioni).
+                    </p>
+                    <Button variant="ghost" className="mt-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
+                        Sfoglia Database &rarr;
+                    </Button>
+                </div>
+
+                {/* Option 1: CSV */}
+                <div className="border-2 border-dashed border-purple-300 dark:border-purple-700/50 bg-purple-50/50 dark:bg-purple-900/10 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors cursor-pointer relative">
+                    <input type="file" accept=".csv" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={handleFileChange} />
+                    <div className="p-4 rounded-full bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 mb-4">
+                        <Upload className="w-8 h-8" />
+                    </div>
+                    <h3 className="font-semibold text-lg text-purple-900 dark:text-purple-100">Carica File CSV</h3>
+                    <p className="text-sm text-purple-500/80 mt-2 max-w-xs">
+                        Carica un file .csv con colonne: email, nome, azienda, etc.
+                    </p>
+                    {file && <p className="mt-4 font-medium text-purple-600 bg-purple-100 dark:bg-purple-900 px-3 py-1 rounded-full text-sm">{file.name}</p>}
+                </div>
             </div>
+
+            {/* CSV Preview Section */}
             {preview.length > 0 && (
-                <div className="space-y-2">
-                    <Button className="w-full mt-4 bg-purple-600 hover:bg-purple-700" onClick={handleUpload} disabled={uploading}>
-                        {uploading ? <Loader2 className="animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
-                        Carica e Analizza {preview.length}+ Lead
+                <div className="mt-8 border-t border-slate-200 dark:border-slate-800 pt-8 animate-in fade-in slide-in-from-bottom-4">
+                    <h4 className="font-medium text-slate-800 dark:text-white mb-4">Anteprima Import CSV</h4>
+                    <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-xl overflow-x-auto border border-slate-200 dark:border-slate-800">
+                        <pre className="text-xs text-slate-600 dark:text-slate-400">{JSON.stringify(preview, null, 2)}</pre>
+                    </div>
+
+                    <Button className="w-full mt-4 bg-purple-600 hover:bg-purple-700 text-lg py-6" onClick={handleUpload} disabled={uploading}>
+                        {uploading ? <Loader2 className="animate-spin mr-2" /> : <Upload className="w-5 h-5 mr-2" />}
+                        Importa e Analizza {preview.length} Lead
                     </Button>
                 </div>
             )}
+
+            <ContactPickerModal
+                isOpen={isDbImportOpen}
+                onClose={() => setIsDbImportOpen(false)}
+                onImport={handleImportFromDB}
+                existingLeadContactIds={existingContactIds}
+            />
         </div>
     )
 }
@@ -941,9 +1242,18 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
                                 <Sparkles className="w-4 h-4 text-purple-500" />
                                 Configurazione Arricchimento AI
                             </h3>
-                            <p className="text-sm text-slate-500">
+                            <p className="text-sm text-slate-500 mb-2">
                                 Scegli come l'AI deve analizzare i siti web dei lead.
                             </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setIsEnrichmentSettingsOpen(true)}
+                                className="text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5"
+                            >
+                                <Settings className="w-3.5 h-3.5 mr-2" />
+                                Impostazioni Avanzate
+                            </Button>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                             <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
@@ -1013,32 +1323,19 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
                                         <span className="font-semibold text-sm text-slate-900 dark:text-white">{type.label}</span>
                                     </div>
 
-                                    <div className="flex items-center gap-1.5 ml-2">
-                                        {/* Settings Icon (Future Use) */}
-                                        <div
-                                            className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-white/10 text-slate-300 hover:text-purple-500 transition-colors"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setIsEnrichmentSettingsOpen(true);
-                                            }}
-                                            title="Configurazione Avanzata Query"
-                                        >
-                                            <Settings className="w-3.5 h-3.5" />
+                                    {/* Info Icon with Tooltip */}
+                                    <div className="relative group/tooltip">
+                                        <div className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-purple-500 transition-colors">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>
                                         </div>
-
-                                        {/* Info Icon with Tooltip */}
-                                        <div className="relative group/tooltip">
-                                            <div className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-purple-500 transition-colors">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>
-                                            </div>
-                                            {/* Tooltip Content */}
-                                            <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-xl shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
-                                                {type.detailed_desc}
-                                                <div className="absolute bottom-0 right-4 transform translate-y-1/2 rotate-45 w-2 h-2 bg-slate-900"></div>
-                                            </div>
+                                        {/* Tooltip Content */}
+                                        <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-xl shadow-xl opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
+                                            {type.detailed_desc}
+                                            <div className="absolute bottom-0 right-4 transform translate-y-1/2 rotate-45 w-2 h-2 bg-slate-900"></div>
                                         </div>
                                     </div>
                                 </div>
+
                                 <p className="text-xs text-slate-500 dark:text-slate-400 pl-6">
                                     {type.desc}
                                 </p>
@@ -1188,7 +1485,7 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
                         <Button variant="destructive" className="cursor-pointer">Elimina Campagna</Button>
                     </div>
                 </div>
-            </div>
+            </div >
 
             <EnrichmentSettingsModal
                 isOpen={isEnrichmentSettingsOpen}
@@ -1196,6 +1493,6 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
                 config={formData.enrichment_config || { type: 'generic' }}
                 onSave={(newConfig) => setFormData({ ...formData, enrichment_config: newConfig })}
             />
-        </div>
+        </div >
     )
 }

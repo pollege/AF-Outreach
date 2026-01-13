@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { Loader2, Upload, Users, BarChart3, Settings, Search, Timer } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import Papa from "papaparse";
+import { toast } from "sonner";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 export default function CampaignDetailPage() {
     const params = useParams();
@@ -56,9 +58,10 @@ export default function CampaignDetailPage() {
         const { error } = await supabase.from('campaigns').update({ status: newStatus }).eq('id', id);
 
         if (error) {
-            alert("Errore aggiornamento status");
+            toast.error("Errore aggiornamento status");
         } else {
             setCampaign({ ...campaign, status: newStatus });
+            toast.success(`Campagna ${newStatus === 'active' ? 'attivata' : 'messa in pausa'}`);
         }
     };
 
@@ -95,7 +98,7 @@ export default function CampaignDetailPage() {
                 {[
                     { id: 'overview', label: 'Panoramica', icon: BarChart3 },
                     { id: 'leads', label: 'Leads', icon: Users },
-                    { id: 'import', label: 'Importa CSV', icon: Upload },
+                    { id: 'import', label: 'Importa Dati', icon: Upload },
                     { id: 'sequence', label: 'Sequenza', icon: Timer },
                     { id: 'settings', label: 'Impostazioni', icon: Settings },
                 ].map((tab) => (
@@ -118,7 +121,7 @@ export default function CampaignDetailPage() {
             {/* Content */}
             <div className="min-h-[400px]">
                 {activeTab === 'overview' && <OverviewTab campaign={campaign} />}
-                {activeTab === 'leads' && <LeadsTab campaignId={id} />}
+                {activeTab === 'leads' && <LeadsTab campaignId={id} enrichmentEnabled={campaign.enrichment_enabled} />}
                 {activeTab === 'import' && <ImportTab campaignId={id} onImportSuccess={() => setActiveTab('leads')} />}
                 {activeTab === 'sequence' && <SequenceEditor campaign={campaign} onUpdate={(c) => setCampaign(c)} />}
                 {activeTab === 'settings' && <SettingsTab campaign={campaign} onUpdate={(c) => setCampaign(c)} />}
@@ -149,20 +152,23 @@ function OverviewTab({ campaign }: { campaign: any }) {
 import { LeadEditor } from "@/components/leads/LeadEditor";
 import { LeadDetailsModal } from "@/components/leads/LeadDetailsModal";
 import { SequenceEditor } from "@/components/campaigns/SequenceEditor";
-import { Edit2, Eye } from "lucide-react";
+import { LeadsTable } from "@/components/leads/LeadsTable";
+import { ContactPickerModal } from "@/components/leads/ContactPickerModal";
+import { Edit2, Eye, Database } from "lucide-react";
 
-function LeadsTab({ campaignId }: { campaignId: string }) {
+function LeadsTab({ campaignId, enrichmentEnabled }: { campaignId: string, enrichmentEnabled: boolean }) {
     const [leads, setLeads] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingLead, setEditingLead] = useState<any>(null); // State for modal
     const [viewingLead, setViewingLead] = useState<any>(null); // State for details
     const [searchTerm, setSearchTerm] = useState("");
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
     useEffect(() => {
         async function fetchLeads() {
             const { data } = await supabase
                 .from('leads')
-                .select('*, messages(*)')
+                .select('*, contacts(*), messages(*)') // Link contacts
                 .eq('campaign_id', campaignId)
                 .order('created_at', { ascending: false });
             setLeads(data || []);
@@ -172,56 +178,35 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
     }, [campaignId]);
 
     const handleSaveLead = (updatedLead: any) => {
-        setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
-    };
-
-    const translateStatus = (status: string) => {
-        if (status === 'draft') return 'Bozza';
-        if (status === 'queued') return 'In Coda';
-        if (status === 'sent') return 'Inviato';
-        if (status === 'new') return 'Nuovo';
-        if (status === 'researched') return 'Arricchito';
-        if (status === 'message_generated') return 'Msg Generato';
-        return status;
-    };
-
-    const filteredLeads = leads.filter(lead =>
-        (lead.first_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (lead.last_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (lead.company_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (lead.email?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-    );
-
-    const [lastClick, setLastClick] = useState<{ id: string, time: number } | null>(null);
-    const [mouseDownPos, setMouseDownPos] = useState({ x: 0, y: 0 });
-
-    const isDrag = (e: React.MouseEvent) => {
-        const dx = Math.abs(e.clientX - mouseDownPos.x);
-        const dy = Math.abs(e.clientY - mouseDownPos.y);
-        return dx > 5 || dy > 5;
-    };
-
-    const handleRowClick = (lead: any, e: React.MouseEvent) => {
-        if (isDrag(e)) return;
-        setViewingLead(lead);
-    };
-
-    const handleCellClick = (e: React.MouseEvent, lead: any) => {
-        e.stopPropagation();
-
-        if (isDrag(e)) {
-            setLastClick(null);
-            return;
-        }
-
-        const now = Date.now();
-        if (lastClick && lastClick.id === lead.id && now - lastClick.time < 200) {
-            setViewingLead(lead);
-            setLastClick(null);
+        // Optimistic update
+        if (leads.some(l => l.id === updatedLead.id)) {
+            setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
         } else {
-            setLastClick({ id: lead.id, time: now });
+            setLeads([updatedLead, ...leads]);
         }
     };
+
+    const handleUpdateFromModal = (updatedLead: any) => {
+        // Update the list
+        setLeads(leads.map(l => l.id === updatedLead.id ? updatedLead : l));
+        // Update the modal view
+        setViewingLead(updatedLead);
+    }
+
+
+
+    const filteredLeads = leads.filter(lead => {
+        // Search in CONTACT fields
+        const c = lead.contacts || {};
+        return (
+            (c.first_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+            (c.last_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+            (c.company_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+            (c.email?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+        );
+    });
+
+
 
     return (
         <div className="space-y-4">
@@ -235,83 +220,29 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-                <Button variant="outline" size="sm">Esporta</Button>
+                <div className="flex gap-2">
+
+                    <Button variant="outline" size="sm" onClick={() => setEditingLead({})}>
+                        <Users className="w-4 h-4 mr-2" />
+                        Nuovo Lead
+                    </Button>
+                    <Button variant="outline" size="sm">Esporta</Button>
+                </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
-                <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-50 dark:bg-white/5 text-slate-500 border-b border-slate-200 dark:border-white/10">
-                        <tr>
-                            <th className="px-4 py-3 font-medium">Nome</th>
-                            <th className="px-4 py-3 font-medium">Azienda</th>
-                            <th className="px-4 py-3 font-medium">Email</th>
-                            <th className="px-4 py-3 font-medium">Stato</th>
-                            <th className="px-4 py-3 font-medium">Score</th>
-                            <th className="px-4 py-3 font-medium text-right">Azioni</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-white/10">
-                        {loading ? (
-                            <tr><td colSpan={6} className="p-4 text-center">Caricamento...</td></tr>
-                        ) : filteredLeads.length === 0 ? (
-                            <tr><td colSpan={6} className="p-8 text-center text-slate-500">Nessun lead trovato. Importa un CSV.</td></tr>
-                        ) : (
-                            filteredLeads.map((lead) => (
-                                <tr
-                                    key={lead.id}
-                                    className="hover:bg-slate-50 dark:hover:bg-white/5 group cursor-pointer"
-                                    onMouseDown={(e) => setMouseDownPos({ x: e.clientX, y: e.clientY })}
-                                    onClick={(e) => handleRowClick(lead, e)}
-                                >
-                                    <td
-                                        className="px-4 py-3 font-medium cursor-default"
-                                        onMouseDown={(e) => setMouseDownPos({ x: e.clientX, y: e.clientY })}
-                                        onClick={(e) => handleCellClick(e, lead)}
-                                    >
-                                        {lead.first_name} {lead.last_name}
-                                    </td>
-                                    <td
-                                        className="px-4 py-3 text-slate-500 cursor-default"
-                                        onMouseDown={(e) => setMouseDownPos({ x: e.clientX, y: e.clientY })}
-                                        onClick={(e) => handleCellClick(e, lead)}
-                                    >
-                                        {lead.company_name}
-                                    </td>
-                                    <td className="px-4 py-3 text-slate-500">{lead.email}</td>
-                                    <td className="px-4 py-3">
-                                        <span className="px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-400 uppercase">
-                                            {translateStatus(lead.status)}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3">{lead.lead_score}</td>
-                                    <td className="px-4 py-3 text-right flex justify-end gap-2">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setViewingLead(lead);
-                                            }}
-                                            className="p-2 hover:bg-slate-200 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-blue-500 transition-colors cursor-pointer"
-                                            title="Vedi Dettagli"
-                                        >
-                                            <Eye className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setEditingLead(lead);
-                                            }}
-                                            className="p-2 hover:bg-slate-200 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-blue-500 transition-colors cursor-pointer"
-                                            title="Modifica Lead"
-                                        >
-                                            <Edit2 className="w-4 h-4" />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
+            {/* Leads Table Component */}
+            <LeadsTable
+                data={filteredLeads}
+                loading={loading}
+                selectedIds={selectedIds}
+                onSelectionChange={setSelectedIds}
+                onView={setViewingLead}
+                onEdit={setEditingLead}
+                settingsKey="campaign_leads_table_common_v1"
+                enableColumnConfig={false}
+            />
+
+
 
             {/* Edit Modal */}
             <LeadEditor
@@ -319,6 +250,7 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
                 isOpen={!!editingLead}
                 onClose={() => setEditingLead(null)}
                 onSave={handleSaveLead}
+                campaignId={campaignId}
             />
 
             {/* Details Modal */}
@@ -326,6 +258,8 @@ function LeadsTab({ campaignId }: { campaignId: string }) {
                 lead={viewingLead}
                 isOpen={!!viewingLead}
                 onClose={() => setViewingLead(null)}
+                enrichmentEnabled={enrichmentEnabled}
+                onLeadUpdate={handleUpdateFromModal}
             />
         </div>
     )
@@ -335,6 +269,12 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
     const [file, setFile] = useState<File | null>(null);
     const [preview, setPreview] = useState<any[]>([]);
     const [uploading, setUploading] = useState(false);
+    const [progress, setProgress] = useState(0);
+
+    // DB Import State
+    const [isDbImportOpen, setIsDbImportOpen] = useState(false);
+    const [existingContactIds, setExistingContactIds] = useState<string[]>([]);
+    const [loadingExisting, setLoadingExisting] = useState(false);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0];
@@ -351,66 +291,276 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
         }
     };
 
+    const handleOpenDbImport = async () => {
+        setLoadingExisting(true);
+        const { data } = await supabase.from('leads').select('contact_id').eq('campaign_id', campaignId);
+        if (data) {
+            setExistingContactIds(data.map(l => l.contact_id).filter(Boolean));
+        }
+        setLoadingExisting(false);
+        setIsDbImportOpen(true);
+    };
+
+    const handleImportFromDB = async (contacts: any[]) => {
+        const newLeads = contacts.map(contact => ({
+            campaign_id: campaignId,
+            contact_id: contact.id,
+            status: 'new',
+            lead_score: 0,
+            first_name: contact.first_name,
+            last_name: contact.last_name,
+            email: contact.email,
+            company_name: contact.company_name,
+            job_title: contact.job_title,
+            linkedin_url: contact.linkedin_url
+        }));
+
+        const { error } = await supabase.from('leads').insert(newLeads);
+
+        if (error) {
+            toast.error("Errore importazione: " + error.message);
+        } else {
+            toast.success(`Importati ${contacts.length} leads dal Database`);
+            onImportSuccess();
+        }
+    };
+
     const handleUpload = async () => {
         if (!file) return;
         setUploading(true);
+        setProgress(0);
 
         try {
             Papa.parse(file, {
                 header: true,
                 skipEmptyLines: true,
                 complete: async (results) => {
-                    const leads = results.data.map((row: any) => ({
-                        campaign_id: campaignId,
-                        first_name: row.first_name || row.FirstName,
-                        last_name: row.last_name || row.LastName,
-                        email: row.email || row.Email,
-                        company_name: row.company_name || row.Company,
-                        job_title: row.job_title || row.JobTitle,
-                        linkedin_url: row.linkedin_url || row.LinkedIn,
-                        status: 'new'
-                    })).filter((l: any) => l.email && l.company_name);
+                    const totalRows = results.data.length;
 
-                    if (leads.length === 0) {
-                        alert("Nessun lead valido trovato nel CSV (controlla intestazioni).");
+                    // 1. Pre-process CSV rows
+                    const processedRows = results.data.map((row: any) => {
+                        // Normalize Keys
+                        const normalizedRow: any = {};
+                        Object.keys(row).forEach(key => {
+                            const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            normalizedRow[cleanKey] = row[key];
+                        });
+
+                        const findVal = (variations: string[]) => {
+                            for (const v of variations) {
+                                if (normalizedRow[v]) return normalizedRow[v];
+                            }
+                            return null;
+                        };
+
+                        const email = findVal(['email', 'mail', 'e-mail']);
+                        if (!email) return null; // Skip invalid rows
+
+                        return {
+                            email: email,
+                            first_name: findVal(['firstname', 'first_name', 'nome', 'name']),
+                            last_name: findVal(['lastname', 'last_name', 'cognome', 'surname']),
+                            company_name: findVal(['companyname', 'company_name', 'company', 'azienda']),
+                            job_title: findVal(['jobtitle', 'job_title', 'role', 'position', 'title']),
+                            linkedin_url: findVal(['linkedin', 'linkedinurl', 'linkedin_url', 'website']),
+
+                            // Custom Fields for Contact
+                            raw_row: row
+                        };
+                    }).filter(r => r !== null);
+
+                    if (processedRows.length === 0) {
+                        toast.error("Nessun lead valido trovato (Email mancanti).");
                         setUploading(false);
                         return;
                     }
 
-                    const { error } = await supabase.from('leads').insert(leads);
+                    // 2. Prepare Contacts Payload (Unique Emails)
+                    // We use a Map to keep the "last" occurrence or just keys
+                    const contactsMap = new Map();
+                    const customFieldKeysToIgnore = ['firstname', 'first_name', 'nome', 'name', 'lastname', 'last_name', 'cognome', 'surname', 'email', 'mail', 'e-mail', 'companyname', 'company_name', 'company', 'azienda', 'jobtitle', 'job_title', 'role', 'position', 'title', 'linkedin', 'linkedinurl', 'linkedin_url'];
 
-                    if (error) {
-                        console.error(error);
-                        alert("Errore importazione: " + error.message);
-                    } else {
-                        alert(`Importati ${leads.length} leads con successo!`);
-                        onImportSuccess();
+                    processedRows.forEach((p: any) => {
+                        // Extract custom fields for this specific contact
+                        const customFields: any = {};
+                        Object.keys(p.raw_row).forEach(originalKey => {
+                            const cleanKey = originalKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            if (!customFieldKeysToIgnore.includes(cleanKey)) {
+                                customFields[originalKey] = p.raw_row[originalKey];
+                            }
+                        });
+
+                        contactsMap.set(p.email, {
+                            email: p.email,
+                            first_name: p.first_name,
+                            last_name: p.last_name,
+                            company_name: p.company_name,
+                            job_title: p.job_title,
+                            linkedin_url: p.linkedin_url,
+                            custom_fields: customFields
+                        });
+                    });
+
+                    const uniqueContacts = Array.from(contactsMap.values());
+
+                    // 3. Upsert Contacts & Fetch IDs
+                    // Chunking for contacts
+                    const CHUNK_SIZE = 50;
+                    const contactChunks = [];
+                    for (let i = 0; i < uniqueContacts.length; i += CHUNK_SIZE) {
+                        contactChunks.push(uniqueContacts.slice(i, i + CHUNK_SIZE));
                     }
+
+                    let processedCount = 0;
+
+                    // We need a map of Email -> UUID to link later
+                    const emailToIdMap = new Map<string, string>();
+
+                    for (const chunk of contactChunks) {
+                        // Upsert contacts
+                        const { error: upsertError } = await supabase
+                            .from('contacts')
+                            .upsert(chunk, { onConflict: 'email', ignoreDuplicates: false }); // Update existing contacts with new info? or true to keep old? let's update (false)
+
+                        if (upsertError) {
+                            console.error("Contact Upsert Error", upsertError);
+                            // Continue?
+                        }
+
+                        // Fetch IDs for this chunk (we need to fetch by email)
+                        const emails = chunk.map((c: any) => c.email);
+                        const { data: fetchedContacts } = await supabase
+                            .from('contacts')
+                            .select('id, email')
+                            .in('email', emails);
+
+                        if (fetchedContacts) {
+                            fetchedContacts.forEach((fan: any) => {
+                                emailToIdMap.set(fan.email, fan.id);
+                            });
+                        }
+
+                        processedCount += chunk.length;
+                        setProgress(Math.round((processedCount / (uniqueContacts.length * 2)) * 100)); // First half of progress
+                    }
+
+                    // 4. Insert Campaign Leads (Links)
+                    const leadsPayload = processedRows.map((p: any) => {
+                        const contactId = emailToIdMap.get(p.email);
+                        if (!contactId) return null;
+
+                        return {
+                            campaign_id: campaignId,
+                            contact_id: contactId,
+                            status: 'new',
+                            // We duplicate these for now for backward compatibility, but eventually we'll remove them
+                            email: p.email,
+                            first_name: p.first_name,
+                            last_name: p.last_name,
+                            company_name: p.company_name
+                        };
+                    }).filter((l: any) => l !== null);
+
+                    const leadsChunks = [];
+                    for (let i = 0; i < leadsPayload.length; i += CHUNK_SIZE) {
+                        leadsChunks.push(leadsPayload.slice(i, i + CHUNK_SIZE));
+                    }
+
+                    let insertedLeadsCount = 0;
+                    let skippedCount = 0;
+
+                    for (const chunk of leadsChunks) {
+                        const { data, error } = await supabase
+                            .from('leads')
+                            .upsert(chunk, { onConflict: 'email, campaign_id', ignoreDuplicates: true })
+                            .select();
+
+                        if (error) console.error("Leads Insert Error", error);
+                        if (data) insertedLeadsCount += data.length;
+
+                        processedCount += chunk.length;
+                        // Normalize progress to max 100
+                        const currentProg = Math.round(50 + (processedCount / (uniqueContacts.length * 2)) * 50);
+                        setProgress(Math.min(currentProg, 100));
+                    }
+
                     setUploading(false);
+                    skippedCount = totalRows - insertedLeadsCount;
+
+                    toast.success(
+                        <div className="flex flex-col gap-1">
+                            <span className="font-semibold">Importazione completata (Global Architecture)!</span>
+                            <span className="text-xs">
+                                ✅ {insertedLeadsCount} collegati
+                                <br />
+                                ⚠️ {skippedCount} già presenti
+                            </span>
+                        </div>,
+                        { duration: 5000 }
+                    );
+                    onImportSuccess();
                 }
             });
         } catch (e: any) {
-            alert("Errore: " + e.message);
+            toast.error("Errore: " + e.message);
             setUploading(false);
         }
     };
-
     return (
-        <div className="max-w-xl mx-auto space-y-6">
-            <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer relative">
-                <input
-                    type="file"
-                    accept=".csv"
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    onChange={handleFileChange}
-                />
-                <Upload className="w-10 h-10 text-slate-400 mb-4" />
-                <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Carica file CSV</h3>
-                <p className="text-sm text-slate-500 mt-2">o trascina il file qui</p>
-                {file && <p className="mt-4 font-medium text-blue-500">{file.name}</p>}
+        <div className="max-w-4xl mx-auto space-y-8">
+            <h2 className="text-xl font-semibold text-slate-800 dark:text-white mb-6">Scegli la fonte dei dati</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Option 2: Database */}
+                <div
+                    onClick={handleOpenDbImport}
+                    className="group border-2 border-dashed border-indigo-200 dark:border-indigo-800/50 bg-indigo-50/30 dark:bg-indigo-900/10 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-500"
+                >
+                    <div className="p-4 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 mb-4 group-hover:scale-110 transition-transform">
+                        {loadingExisting ? <Loader2 className="w-8 h-8 animate-spin" /> : <Database className="w-8 h-8" />}
+                    </div>
+                    <h3 className="font-semibold text-lg text-indigo-900 dark:text-indigo-100">Da Database Contatti</h3>
+                    <p className="text-sm text-indigo-500/80 mt-2 max-w-xs">
+                        Seleziona dai contatti già presenti nel tuo CRM (o importati da estensioni).
+                    </p>
+                    <Button variant="ghost" className="mt-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900/50">
+                        Sfoglia Database &rarr;
+                    </Button>
+                </div>
+
+                {/* Option 1: CSV */}
+                <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer relative">
+                    <input
+                        type="file"
+                        accept=".csv"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={handleFileChange}
+                    />
+                    <div className="p-4 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 mb-4">
+                        <Upload className="w-8 h-8" />
+                    </div>
+                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Carica file CSV</h3>
+                    <p className="text-sm text-slate-500 mt-2">o trascina il file qui</p>
+                    {file && <p className="mt-4 font-medium text-blue-500">{file.name}</p>}
+                </div>
             </div>
 
-            {preview.length > 0 && (
+            {uploading && (
+                <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-medium text-slate-500">
+                        <span>Importazione in corso...</span>
+                        <span>{progress}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                            style={{ width: `${progress}%` }}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {!uploading && preview.length > 0 && (
                 <div className="space-y-2">
                     <h4 className="font-medium text-sm">Preview (Primi 5)</h4>
                     <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-xl overflow-x-auto">
@@ -418,14 +568,23 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
                     </div>
 
                     <Button className="w-full mt-4" onClick={handleUpload} disabled={uploading}>
-                        {uploading ? <Loader2 className="animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
+                        <Upload className="w-4 h-4 mr-2" />
                         Importa {preview.length}+ Lead
                     </Button>
                 </div>
             )}
+
+            <ContactPickerModal
+                isOpen={isDbImportOpen}
+                onClose={() => setIsDbImportOpen(false)}
+                onImport={handleImportFromDB}
+                existingLeadContactIds={existingContactIds}
+            />
         </div>
     )
 }
+
+
 
 
 function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any) => void }) {
@@ -453,6 +612,20 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
     }, []);
 
     const [updating, setUpdating] = useState(false);
+    const [isSending, setIsSending] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [debugResult, setDebugResult] = useState<any>(null);
+
+    const handleDelete = async () => {
+        try {
+            const { error } = await supabase.from('campaigns').delete().eq('id', campaign.id);
+            if (error) throw error;
+            toast.success("Campagna eliminata");
+            window.location.href = "/campaigns";
+        } catch (e: any) {
+            toast.error("Errore eliminazione: " + e.message);
+        }
+    };
 
     const handleSave = async () => {
         setUpdating(true);
@@ -476,10 +649,10 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
             .eq('id', campaign.id);
 
         if (error) {
-            alert("Errore salvataggio: " + error.message);
+            toast.error("Errore salvataggio: " + error.message);
         } else {
             onUpdate({ ...campaign, ...updates });
-            alert("Impostazioni salvate con successo!");
+            toast.success("Impostazioni salvate con successo!");
         }
         setUpdating(false);
     }
@@ -664,10 +837,107 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
                             <h3 className="font-semibold text-lg text-red-600 mb-1">Zona Pericolosa</h3>
                             <p className="text-sm text-slate-500">Queste azioni sono distruttive e non possono essere annullate.</p>
                         </div>
-                        <Button variant="destructive">Elimina Campagna</Button>
+                        <Button variant="destructive" onClick={() => setShowDeleteModal(true)}>Elimina Campagna</Button>
                     </div>
                 </div>
-            </div>
-        </div>
+
+                {/* 5. Test Zone (Wide) ... (rest of code) */}
+                <div className="glass dark:glass-dark p-6 rounded-2xl border border-white/20 border-l-4 border-l-blue-500 md:col-span-2 bg-blue-50/10">
+                    {/* ... Test Zone Content ... (keep as is, I need to match the context properly) */}
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 className="font-semibold text-lg text-blue-600 mb-1 flex items-center gap-2">
+                                <Search className="w-5 h-5" />
+                                Test Runner (Debug)
+                            </h3>
+                            <p className="text-sm text-slate-500">Strumenti per forzare l'esecuzione immediata (ignora pianificazione).</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex gap-4">
+                            <Button variant="outline" onClick={async () => {
+                                setDebugResult({ status: 'running', message: 'Generazione in corso...' });
+                                try {
+                                    const res = await fetch(`/api/cron/generate?campaign_id=${campaign.id}`);
+                                    const data = await res.json();
+                                    setDebugResult({
+                                        type: 'GENERATE',
+                                        timestamp: new Date().toLocaleTimeString(),
+                                        data: data
+                                    });
+                                    if (data.generated_count > 0) toast.success(`Generati ${data.generated_count} messaggi`);
+                                    else toast.info("Nessun messaggio generato");
+                                } catch (e: any) {
+                                    setDebugResult({ status: 'error', message: e.message });
+                                    toast.error("Errore generazione");
+                                }
+                            }}>
+                                1. Genera Email (Step 1)
+                            </Button>
+
+                            <Button variant="outline" disabled={isSending} onClick={async () => {
+                                setIsSending(true);
+                                setDebugResult({ status: 'running', message: 'Invio in corso (n8n)...' });
+                                try {
+                                    const res2 = await fetch(`/api/cron/send?force=true&campaign_id=${campaign.id}`);
+                                    const data = await res2.json();
+
+                                    setDebugResult({
+                                        type: 'SEND',
+                                        timestamp: new Date().toLocaleTimeString(),
+                                        status: (data.skipped && data.skipped.length > 0) ? (data.sent_count > 0 ? 'WARNING' : 'ERROR') : 'SUCCESS',
+                                        data: data
+                                    });
+
+                                    if (data.sent_count > 0) {
+                                        toast.success(`Inviate ${data.sent_count} email`);
+                                    }
+                                } catch (e: any) {
+                                    setDebugResult({ status: 'error', message: e.message });
+                                    toast.error("Errore invio");
+                                } finally {
+                                    setIsSending(false);
+                                }
+                            }}>
+                                {isSending ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Inviando...</> : "2. Invia Ora (Step 2 - n8n)"}
+                            </Button>
+                        </div>
+
+                        {/* Debug Console Output */}
+                        {debugResult && (
+                            <div className="mt-4 rounded-xl overflow-hidden border border-slate-200 dark:border-white/10 text-sm font-mono">
+                                <div className="bg-slate-100 dark:bg-slate-900 px-4 py-2 border-b border-slate-200 dark:border-white/10 flex justify-between items-center">
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                        Console Output {debugResult.timestamp && `[${debugResult.timestamp}]`}
+                                    </span>
+                                    <button onClick={() => setDebugResult(null)} className="text-xs text-slate-500 hover:text-slate-700">Clear</button>
+                                </div>
+                                <div className="bg-slate-950 p-4 overflow-x-auto">
+                                    <pre className={cn(
+                                        "whitespace-pre-wrap break-all",
+                                        debugResult.status === 'ERROR' ? "text-red-400" :
+                                            debugResult.status === 'WARNING' ? "text-amber-400" :
+                                                "text-green-400"
+                                    )}>
+                                        {JSON.stringify(debugResult.data || debugResult, null, 2)}
+                                    </pre>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div> {/* This closes the main grid container */}
+
+            <ConfirmModal
+                isOpen={showDeleteModal}
+                onClose={() => setShowDeleteModal(false)}
+                onConfirm={handleDelete}
+                title="Elimina Campagna"
+                description="Sei sicuro di voler eliminare questa campagna? Tutti i lead e i messaggi associati verranno persi definitivamente."
+                confirmText="Elimina Definitivamente"
+                variant="destructive"
+            />
+        </div >
     )
 }
