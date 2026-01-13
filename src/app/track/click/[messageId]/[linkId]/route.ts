@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-export async function GET(request: Request, context: { params: { messageId: string, linkId: string } }) {
+export async function GET(request: Request, context: { params: Promise<{ messageId: string, linkId: string }> }) {
     const { messageId, linkId } = await context.params;
     const { searchParams } = new URL(request.url);
     const targetUrl = searchParams.get('url'); // Securely pass URL or look it up by linkId from DB

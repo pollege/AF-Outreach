@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-export async function GET(request: Request, context: { params: { id: string } }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
     // Await params because in Next 15+ it's a promise, but in 14 it's sync. 
     // Safety check: await it just in case or treat as object.
     // Next.js 15 breaking change: params is Promise. Next 14: params is object.
