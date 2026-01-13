@@ -15,12 +15,10 @@ const getWarmupLimit = (daysActive: number) => {
 export async function GET(req: Request) {
     try {
         const { searchParams } = new URL(req.url);
-        const secret = searchParams.get('cron_secret');
+        const secret = req.headers.get('x-cron-secret') || searchParams.get('cron_secret');
         const envSecret = process.env.CRON_SECRET;
 
         // Security Check
-        // If CRON_SECRET is set in env, we must match it.
-        // If not set (dev), we allow it but warn.
         if (envSecret && secret !== envSecret) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }

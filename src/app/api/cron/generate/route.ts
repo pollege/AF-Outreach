@@ -4,7 +4,7 @@ import { openai } from '@/lib/openai';
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
-    const secret = searchParams.get('cron_secret');
+    const secret = req.headers.get('x-cron-secret') || searchParams.get('cron_secret');
     if (secret !== process.env.CRON_SECRET) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

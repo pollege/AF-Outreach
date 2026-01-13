@@ -10,6 +10,13 @@ export async function GET(req: Request) {
 
     try {
         const { searchParams } = new URL(req.url);
+
+        // Security Check (Headers or Query)
+        const secret = req.headers.get('x-cron-secret') || searchParams.get('cron_secret');
+        if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const campaignId = searchParams.get('campaign_id');
         const forceMode = searchParams.get('force') === 'true';
 
