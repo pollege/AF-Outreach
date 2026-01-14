@@ -69,7 +69,13 @@ export default function CampaignDetailPage() {
                 // We need to pass the user's Auth Token to bypass the Secret check
                 supabase.auth.getSession().then(async ({ data: { session } }) => {
                     const token = session?.access_token;
-                    const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+                    if (!token) {
+                        toast.error("Sessione non valida. Ricarica la pagina e riprova.");
+                        return;
+                    }
+
+                    const headers: HeadersInit = { 'Authorization': `Bearer ${token}` };
 
                     try {
                         // 1. Schedule (Generate Messages)
