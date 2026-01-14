@@ -13,7 +13,21 @@ export async function GET(req: Request) {
 
         // Security Check (Headers or Query)
         const secret = req.headers.get('x-cron-secret') || searchParams.get('cron_secret');
-        if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+        const authHeader = req.headers.get('authorization');
+
+        // Authentication Logic: System (Secret) OR User (Token)
+        let isAuthenticated = false;
+
+        if (process.env.CRON_SECRET && secret === process.env.CRON_SECRET) {
+            isAuthenticated = true; // System / n8n / Vercel Cron
+        } else if (authHeader) {
+            // Manual Trigger from UI
+            const token = authHeader.replace('Bearer ', '');
+            const { data: { user }, error } = await supabase.auth.getUser(token);
+            if (user && !error) isAuthenticated = true;
+        }
+
+        if (!isAuthenticated) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
@@ -65,6 +79,22 @@ export async function GET(req: Request) {
             const contact = lead.contacts || lead;
 
             const campaign = msg.campaigns;
+
+            // 🛑 CRITICAL SAFETY CHECK 🛑
+            // Ensure campaign is ACTIVE before sending. 
+            // This prevents "zombie" messages from paused campaigns being sent.
+            if (campaign?.status !== 'active') {
+                console.warn(`[SAFETY STOP] Msg ${msg.id} skipped. Campaign "${campaign?.name}" is ${campaign?.status}.`);
+
+                // Reset to 'draft' so it's removed from greed queue but saved for later
+                await supabase.from('messages').update({
+                    status: 'draft',
+                    error_log: `Auto-paused: Campaign state is ${campaign?.status}`
+                }).eq('id', msg.id);
+
+                skipped.push({ id: msg.id, reason: `Campaign not active (${campaign?.status})` });
+                continue;
+            }
 
             // --- SENDER SELECTION LOGIC ---
             let senderAccount = null;

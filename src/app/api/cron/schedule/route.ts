@@ -4,7 +4,21 @@ import { supabase } from '@/lib/supabase';
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const secret = req.headers.get('x-cron-secret') || searchParams.get('cron_secret');
-    if (secret !== process.env.CRON_SECRET) {
+    const authHeader = req.headers.get('authorization');
+
+    // Authentication Logic: System (Secret) OR User (Token)
+    let isAuthenticated = false;
+
+    if (process.env.CRON_SECRET && secret === process.env.CRON_SECRET) {
+        isAuthenticated = true; // System / n8n / Vercel Cron
+    } else if (authHeader) {
+        // Manual Trigger from UI
+        const token = authHeader.replace('Bearer ', '');
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (user && !error) isAuthenticated = true;
+    }
+
+    if (!isAuthenticated) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

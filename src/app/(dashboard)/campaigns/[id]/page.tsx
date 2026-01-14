@@ -66,14 +66,19 @@ export default function CampaignDetailPage() {
                 toast.success("Campagna attivata! Avvio pianificazione e invio...");
 
                 // Trigger Cron Jobs Immediately (Fire & Forget)
-                // 1. Schedule (Generate Messages)
-                fetch('/api/cron/schedule?force=true')
-                    .then(() => {
-                        // 2. Send (Process Queue)
-                        // Chain to ensure schedule runs first
-                        fetch('/api/cron/send?force=true');
-                    })
-                    .catch(e => console.error("Error triggering cron:", e));
+                // We need to pass the user's Auth Token to bypass the Secret check
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    const token = session?.access_token;
+                    const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+                    // 1. Schedule (Generate Messages)
+                    fetch('/api/cron/schedule?force=true', { headers })
+                        .then(() => {
+                            // 2. Send (Process Queue)
+                            fetch('/api/cron/send?force=true', { headers });
+                        })
+                        .catch(e => console.error("Error triggering cron:", e));
+                });
             } else {
                 toast.success("Campagna messa in pausa");
             }
