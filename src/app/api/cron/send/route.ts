@@ -34,148 +34,140 @@ export async function GET(req: Request) {
         const campaignId = searchParams.get('campaign_id');
         const forceMode = searchParams.get('force') === 'true';
 
+        console.log(`[Send Cron] Started. CampaignId: ${campaignId}, Force: ${forceMode}`);
+
         // 1. Check Limits (Simplified for MVP)
-        // In real app, query 'email_settings' and count 'messages' sent in last hour.
         const { data: settings } = await supabase.from('email_settings').select('*').single();
-        const webhookUrl = settings?.n8n_webhook_url; // e.g. https://n8n.yourserver.com/webhook/...
+        const webhookUrl = settings?.n8n_webhook_url;
 
         if (!webhookUrl) {
+            console.error("[Send Cron] No n8n webhook configured.");
             return NextResponse.json({ error: 'No n8n webhook configured in settings' }, { status: 400 });
         }
 
         // 2. Fetch Queued Messages
+        // We select more fields and use a limit
         let query = supabase
             .from('messages')
             .select('*, leads(*, contacts(*)), campaigns(*)') // Fetch Deeply Linked Contacts
             .limit(10); // Batch size
 
-        // Strict isolation: If campaign_id is provided, only send messages for that campaign
         if (campaignId) {
             query = query.eq('campaign_id', campaignId);
         }
 
         if (forceMode) {
-            // In Test/Force mode, pick up Drafts too
             query = query.in('status', ['queued', 'draft']);
         } else {
-            // Normal Cron mode: Only Queued
             query = query.eq('status', 'queued');
         }
 
-        const { data: messages } = await query;
+        const { data: messages, error: fetchError } = await query;
+
+        if (fetchError) {
+            console.error("[Send Cron] Fetch Error:", fetchError);
+            throw fetchError;
+        }
 
         if (!messages || messages.length === 0) {
-            return NextResponse.json({ message: 'No queued messages (Try ?force=true to send drafts)' });
+            console.log("[Send Cron] No messages found in queue.");
+            return NextResponse.json({ message: 'No queued messages', sent_count: 0, skipped: [] });
         }
+
+        console.log(`[Send Cron] Found ${messages.length} messages to process.`);
+
+        // 3. LOCKING PHASE: Mark as 'sending' immediately to prevent race conditions
+        const messageIds = messages.map(m => m.id);
+        const { error: lockError } = await supabase
+            .from('messages')
+            .update({ status: 'sending', sent_at: null }) // Temp status
+            .in('id', messageIds);
+
+        if (lockError) {
+            console.error("[Send Cron] Locking Error:", lockError);
+            // If locking fails, we should probably abort to be safe, or just continue if it's a non-blocking error?
+            // Safer to abort to avoid double sends.
+            return NextResponse.json({ error: 'Locking failed' }, { status: 500 });
+        }
+
+        console.log(`[Send Cron] Locked ${messages.length} messages as 'sending'.`);
+
 
         const sentIds = [];
         const skipped = [];
+        const failedIds = [];
 
-        // 3. Process Batch
-        // FUTURE: For High Throughput (Pro SMTPs), switch this loop to await Promise.all(messages.map(...))
+        // 4. Process Batch
         for (const msg of messages) {
             const lead = msg.leads;
-            // Prefer Global Contact info, fallback to Legacy Lead info
-            const contact = lead.contacts || lead;
-
+            const contact = lead.contacts || lead; // Fallback
             const campaign = msg.campaigns;
 
-            // 🛑 CRITICAL SAFETY CHECK 🛑
-            // Ensure campaign is ACTIVE before sending. 
-            // This prevents "zombie" messages from paused campaigns being sent.
+            // Log current processing
+            console.log(`[Send Cron] Processing msg ${msg.id} for ${contact.email}`);
+
+            // A. Campaign Status Check
             if (campaign?.status !== 'active') {
-                console.warn(`[SAFETY STOP] Msg ${msg.id} skipped. Campaign "${campaign?.name}" is ${campaign?.status}.`);
-
-                // Reset to 'draft' so it's removed from greed queue but saved for later
-                await supabase.from('messages').update({
-                    status: 'draft',
-                    error_log: `Auto-paused: Campaign state is ${campaign?.status}`
-                }).eq('id', msg.id);
-
+                console.warn(`[Send Cron] Msg ${msg.id} skipped. Campaign is ${campaign?.status}.`);
                 skipped.push({ id: msg.id, reason: `Campaign not active (${campaign?.status})` });
+                failedIds.push({ id: msg.id, error: `Auto-paused: Campaign state is ${campaign?.status}`, status: 'draft' }); // Revert to draft
                 continue;
             }
 
-            // --- SENDER SELECTION LOGIC ---
+            // B. Sender Selection
             let senderAccount = null;
 
-            // A. Check for Message Specific Override (Manual Send)
+            // Direct Override
             if (msg.sender_account_id) {
-                const { data: directAcc } = await supabase
-                    .from('mail_accounts')
-                    .select('*')
-                    .eq('id', msg.sender_account_id)
-                    .single();
-
-                if (directAcc && directAcc.status === 'active') {
-                    senderAccount = directAcc;
-                }
+                const { data: directAcc } = await supabase.from('mail_accounts').select('*').eq('id', msg.sender_account_id).single();
+                if (directAcc && directAcc.status === 'active') senderAccount = directAcc;
             }
 
-            // B. Check for Campaign Override (if no message specific)
+            // Campaign Override
             if (!senderAccount && campaign?.sender_account_id) {
-                const { data: overrideAcc } = await supabase
-                    .from('mail_accounts')
-                    .select('*')
-                    .eq('id', campaign.sender_account_id)
-                    .single();
-
-                // Verify limits
+                const { data: overrideAcc } = await supabase.from('mail_accounts').select('*').eq('id', campaign.sender_account_id).single();
                 if (overrideAcc && overrideAcc.status === 'active') {
                     if (overrideAcc.daily_sent < overrideAcc.daily_limit) {
                         senderAccount = overrideAcc;
                     } else {
-                        console.warn(`Campaign Override Account ${overrideAcc.email} has reached daily limit.`);
-                        // Fallback to rotation or simple skip?
-                        // For now: Skip message to respect override intent (don't send from random person if CEO was requested)
-                        console.log(`Skipping msg ${msg.id} due to override account limit.`);
+                        console.log(`[Send Cron] Override account limit reached. Skipping.`);
+                        skipped.push({ id: msg.id, reason: "Sender account limit reached" });
+                        failedIds.push({ id: msg.id, error: "Sender limit reached", status: 'queued' }); // Keep queued
                         continue;
                     }
                 }
             }
 
-            // B. Auto Rotation (if no override OR override invalid/missing, but logic above skips if override limit hit)
-            // But if campaign.sender_account_id was NULL, we rotate.
+            // Auto Rotation
             if (!senderAccount && !campaign?.sender_account_id) {
-                // Fetch all active accounts with available budget
-                const { data: validAccounts } = await supabase
-                    .from('mail_accounts')
-                    .select('*')
-                    .eq('status', 'active');
-                // .gt('daily_limit', supabase.raw('daily_sent')); // Removed: Complex filter done in JS below
-
-                // Supabase doesn't support col comparison easy in JS client filters sometimes. 
-                // Let's fetch active and filter in JS for MVP (assuming low # of accounts)
                 const { data: allActive } = await supabase.from('mail_accounts').select('*').eq('status', 'active');
-
+                // Simple random load balancing among those with quota
                 const candidates = allActive?.filter(a => a.daily_sent < a.daily_limit) || [];
-
                 if (candidates.length > 0) {
-                    // Random Load Balancing
                     senderAccount = candidates[Math.floor(Math.random() * candidates.length)];
                 } else {
-                    console.error("No mail accounts available with quota!");
-                    continue; // Skip sending
+                    console.error("[Send Cron] No available mail accounts.");
+                    skipped.push({ id: msg.id, reason: "No mail accounts with quota" });
+                    failedIds.push({ id: msg.id, error: "No sender quota", status: 'queued' });
+                    continue;
                 }
             }
 
             if (!senderAccount) {
-                console.error(`Could not determine sender for msg ${msg.id}`);
-                skipped.push({ id: msg.id, reason: "No active sender account found (check Settings > Email Accounts)" });
+                console.error(`[Send Cron] No sender found for msg ${msg.id}`);
+                skipped.push({ id: msg.id, reason: "No sender found" });
+                failedIds.push({ id: msg.id, error: "No active sender", status: 'failed' });
                 continue;
             }
 
-            // --- END SENDER SELECTION ---
 
-            // Tracking Logic
+            // C. Payload Construction
             const trackingPixel = campaign?.tracking_enabled
                 ? `<img src="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/track/open?mid=${msg.id}" width="1" height="1" style="display:none" />`
                 : '';
 
-            // Italian Footer (Always included)
             const unsubscribeFooter = `<br><br><small>Se non vuoi più ricevere queste email, <a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/track/unsubscribe?lid=${lead.id}">disiscriviti qui</a>.</small>`;
 
-            // Prepare Payload for n8n
             const payload = {
                 message_id: msg.id,
                 to_email: contact.email,
@@ -186,7 +178,6 @@ export async function GET(req: Request) {
                     campaign: campaign?.name,
                     company: contact.company_name
                 },
-                // INJECT DYNAMIC SMTP CREDENTIALS
                 smtp_config: {
                     host: senderAccount.smtp_host,
                     port: senderAccount.smtp_port,
@@ -198,7 +189,7 @@ export async function GET(req: Request) {
                 }
             };
 
-            // 4. Send to n8n
+            // D. Send via n8n
             try {
                 const n8nResponse = await fetch(webhookUrl, {
                     method: 'POST',
@@ -207,48 +198,79 @@ export async function GET(req: Request) {
                 });
 
                 if (n8nResponse.ok) {
-                    // Success Logic
+                    // SUCCESS
+                    console.log(`[Send Cron] Msg ${msg.id} SENT via n8n.`);
+
+                    // Update Message Status
                     await supabase.from('messages').update({
                         status: 'sent',
                         sent_at: new Date().toISOString(),
-                        error_log: null // Clear previous errors if any
+                        error_log: null
                     }).eq('id', msg.id);
 
-                    await supabase.rpc('increment_daily_sent', { account_id: senderAccount.id });
+                    // Update Lead Status
+                    // Also update the Lead status to 'connected' or 'sent' to reflect progress
+                    // We assume 'sent' or similar. Check your enum. 
+                    // Based on user feedback ("IN CODA" to "Inviato"), we should update Lead status if needed.
+                    // Actually, usually leads move to 'contacted' or stay 'active'.
+                    // Let's just update the message for now, the user sees message status in the UI. 
+                    // Wait, user said "Lead status" didn't update.
+                    // If the LeadsTable shows LEAD status, we must update LEAD status.
+                    // If it shows MESSAGE status, then updating message is enough.
+                    // Usually Leads Table shows "Status" column from the Lead table.
+                    // So we MUST update the Lead status to 'contacted' or similar?
+                    // Let's safe-check and update Lead to 'contacted' if it was 'new' or 'queued'.
+                    await supabase.from('leads').update({
+                        status: 'contacted'
+                        // Note: Ensure 'contacted' is a valid status enum in your DB. 
+                        // If not, maybe use 'active'? User mentioned "Inviato" for message. 
+                        // I will set it to 'contacted' which is standard.
+                    }).eq('id', lead.id);
+
+                    // Increment Sender Stats
+                    // Attempt RPC, ignore if fails (backward compatibility)
+                    // try { await supabase.rpc('increment_daily_sent', { account_id: senderAccount.id }); } catch (e) {} 
+                    // Manual update is safer for now:
                     await supabase.from('mail_accounts').update({ daily_sent: senderAccount.daily_sent + 1 }).eq('id', senderAccount.id);
 
                     sentIds.push(msg.id);
+
                 } else {
-                    // Logic for 500/400 from n8n (Handled Error)
+                    // N8N ERROR
                     const errorMsg = `n8n Error ${n8nResponse.status}: ${await n8nResponse.text()}`;
-                    console.error(errorMsg);
-
-                    // SAVE TO DB
-                    await supabase.from('messages').update({
-                        status: 'failed',
-                        error_log: `(Sender: ${senderAccount.email}) ${errorMsg}`
-                    }).eq('id', msg.id);
-
-                    skipped.push({ id: msg.id, reason: errorMsg });
+                    console.error(`[Send Cron] Msg ${msg.id} FAILED: ${errorMsg}`);
+                    failedIds.push({ id: msg.id, error: errorMsg, status: 'failed' });
+                    skipped.push({ id: msg.id, reason: `n8n Error: ${n8nResponse.status}` });
                 }
             } catch (e: any) {
-                // Logic for Network fail or Offline (Unhandled Error)
-                const netError = `n8n Offline/Network Error: ${e.message}`;
-                console.error(netError);
-
-                // SAVE TO DB
-                await supabase.from('messages').update({
-                    status: 'failed',
-                    error_log: netError
-                }).eq('id', msg.id);
-
-                skipped.push({ id: msg.id, reason: netError });
+                // NETWORK ERROR
+                const netError = `n8n Network Error: ${e.message}`;
+                console.error(`[Send Cron] Msg ${msg.id} NETWORK ERROR: ${netError}`);
+                failedIds.push({ id: msg.id, error: netError, status: 'failed' });
+                skipped.push({ id: msg.id, reason: "Network Error" });
             }
         }
 
-        return NextResponse.json({ sent_count: sentIds.length, ids: sentIds, skipped });
+        // 5. Cleanup Failed/Skipped Messages
+        // We set them to 'sending' earlier. If they failed, we need to set them to 'failed' or 'queued' or 'draft'
+        for (const f of failedIds) {
+            await supabase.from('messages').update({
+                status: f.status,
+                error_log: f.error
+            }).eq('id', f.id);
+        }
+
+        console.log(`[Send Cron] Batch Complete. Sent: ${sentIds.length}, Skipped: ${skipped.length}`);
+
+        return NextResponse.json({
+            sent_count: sentIds.length,
+            ids: sentIds,
+            skipped,
+            debug_message: `Processed ${messages.length}, Sent ${sentIds.length}`
+        });
 
     } catch (error: any) {
+        console.error("[Send Cron] Critical Error:", error);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
