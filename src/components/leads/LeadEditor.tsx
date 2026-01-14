@@ -94,25 +94,42 @@ export function LeadEditor({ lead, isOpen, onClose, onSave, campaignId }: LeadEd
                 updated_at: new Date().toISOString()
             };
 
-            // 2. Upsert Contact (Find or Create)
-            const { data: contact, error: contactError } = await supabase
-                .from('contacts')
-                .upsert(contactPayload, { onConflict: 'email' })
-                .select()
-                .single();
+            // 2. Persist Contact (Update by ID if exists, otherwise Upsert/Create)
+            let contactId = lead?.contact_id || lead?.contacts?.id;
+            let contact;
 
-            if (contactError) throw new Error("Errore salvataggio contatto: " + contactError.message);
+            if (contactId) {
+                // UPDATE existing contact by ID to allow email changes
+                const { data: updatedContact, error: updateError } = await supabase
+                    .from('contacts')
+                    .update(contactPayload)
+                    .eq('id', contactId)
+                    .select()
+                    .single();
+
+                if (updateError) throw new Error("Errore aggiornamento contatto: " + updateError.message);
+                contact = updatedContact;
+            } else {
+                // CREATE or UPSERT (fallback for new leads)
+                const { data: newContact, error: createError } = await supabase
+                    .from('contacts')
+                    .upsert(contactPayload, { onConflict: 'email' })
+                    .select()
+                    .single();
+
+                if (createError) throw new Error("Errore creazione contatto: " + createError.message);
+                contact = newContact;
+            }
 
             if (lead.id) {
                 // UPDATE existing lead
-                // We actually updated the CONTACT above. 
-                // CRITICAL FIX: We MUST also update the 'legacy' columns on the leads table 
-                // because the UI often reads from lead.first_name directly (not lead.contacts.first_name).
+                // CRITICAL FIX: Update contact_id to ensure we are linked to the correct contact (in case of merge/change)
                 await supabase.from('leads').update({
+                    contact_id: contact.id, // <--- SYNC CONTACT ID
                     first_name: formData.first_name,
                     last_name: formData.last_name,
                     company_name: formData.company_name,
-                    email: formData.email, // keeping email in sync is good practice even if unique
+                    email: formData.email,
                     job_title: formData.job_title,
                     linkedin_url: formData.linkedin_url
                 }).eq('id', lead.id);
