@@ -1,6 +1,6 @@
 'use server';
 
-export async function triggerCampaignImmediate() {
+export async function triggerCampaignImmediate(campaignId?: string) {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const secret = process.env.CRON_SECRET;
 
@@ -10,15 +10,16 @@ export async function triggerCampaignImmediate() {
     }
 
     try {
-        console.log("Triggering Cron via Server Action...");
+        const scheduleUrl = `${baseUrl}/api/cron/schedule?force=true`;
+        console.log(`Triggering Schedule: ${scheduleUrl}`);
 
         // 1. Schedule
-        const scheduleRes = await fetch(`${baseUrl}/api/cron/schedule?force=true`, {
+        const scheduleRes = await fetch(scheduleUrl, {
             headers: { 'x-cron-secret': secret },
             cache: 'no-store'
         });
 
-        let scheduleData = {};
+        let scheduleData: any = {};
         try { scheduleData = await scheduleRes.json(); } catch (e) { }
 
         if (!scheduleRes.ok) {
@@ -27,7 +28,12 @@ export async function triggerCampaignImmediate() {
         }
 
         // 2. Send
-        const sendRes = await fetch(`${baseUrl}/api/cron/send?force=true`, {
+        let sendUrl = `${baseUrl}/api/cron/send?force=true`;
+        if (campaignId) sendUrl += `&campaign_id=${campaignId}`;
+
+        console.log(`Triggering Send: ${sendUrl}`);
+
+        const sendRes = await fetch(sendUrl, {
             headers: { 'x-cron-secret': secret },
             cache: 'no-store'
         });
@@ -35,10 +41,12 @@ export async function triggerCampaignImmediate() {
         let sendData: any = {};
         try { sendData = await sendRes.json(); } catch (e) { }
 
+        // Map response fields safely
         return {
             success: true,
-            scheduled: (scheduleData as any).scheduled || 0,
-            sent: (sendData as any).sent || 0
+            scheduled: scheduleData.generated_count || scheduleData.scheduled || 0,
+            sent: sendData.sent_count || sendData.sent || 0,
+            skipped: sendData.skipped || []
         };
 
     } catch (error: any) {
