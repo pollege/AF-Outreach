@@ -61,8 +61,6 @@ export default function LeadsPage() {
     const [campaignSelectorTarget, setCampaignSelectorTarget] = useState<any>(null);
     const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
     const [viewingLeadTab, setViewingLeadTab] = useState<'email' | 'enrichment' | 'details'>('email');
-    const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
-    const [viewingLeadTab, setViewingLeadTab] = useState<'email' | 'enrichment' | 'details'>('email');
     const [viewingFocusField, setViewingFocusField] = useState<string | null>(null);
 
     // Confirm Modal State
