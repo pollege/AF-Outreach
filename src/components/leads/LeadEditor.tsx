@@ -104,6 +104,7 @@ export function LeadEditor({ lead, isOpen, onClose, onSave, campaignId }: LeadEd
             if (formData.email && formData.email !== originalEmail) {
                 const { data: existingCollision } = await supabase
                     .from('contacts')
+                    .select('*')
                     .eq('email', formData.email)
                     .single();
 
