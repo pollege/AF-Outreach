@@ -69,22 +69,21 @@ export default function CampaignDetailPage() {
                 // Trigger Cron Jobs Server-Side
                 try {
                     // toast.info("Generazione messaggi in corso...");
-                    const result = await triggerCampaignImmediate();
+                    const result = await triggerCampaignImmediate(id);
 
                     if (result.success) {
                         const totalScheduled = result.scheduled || 0;
                         const totalSent = result.sent || 0;
+                        const skipped = result.skipped || [];
 
-                        if (totalScheduled > 0) {
-                            toast.success(`${totalScheduled} messaggi generati!`);
-                        }
+                        if (totalScheduled > 0) toast.success(`${totalScheduled} messaggi generati!`);
+                        if (totalSent > 0) toast.success(`${totalSent} email inviate!`);
 
-                        if (totalSent > 0) {
-                            toast.success(`${totalSent} email inviate!`);
-                        }
-
-                        if (totalScheduled === 0 && totalSent === 0) {
-                            toast.warning("Nessun messaggio generato. (Controlla Lead Nuovi e Sequenza)");
+                        if (skipped.length > 0) {
+                            const reason = skipped[0].reason || "Errore sconosciuto";
+                            toast.warning(`Non inviato: ${reason}`);
+                        } else if (totalScheduled === 0 && totalSent === 0) {
+                            toast.info("Nessuna azione necessaria (Code vuote).");
                         }
 
                     } else {
@@ -579,6 +578,7 @@ function ImportTab({ campaignId, onImportSuccess }: { campaignId: string, onImpo
                 </div>
             </div>
 
+            {/* Progress Bar */}
             {uploading && (
                 <div className="space-y-2">
                     <div className="flex justify-between text-xs font-medium text-slate-500">
@@ -875,9 +875,8 @@ function SettingsTab({ campaign, onUpdate }: { campaign: any, onUpdate: (c: any)
                     </div>
                 </div>
 
-                {/* 5. Test Zone (Wide) ... (rest of code) */}
+                {/* 5. Test Zone (Wide) */}
                 <div className="glass dark:glass-dark p-6 rounded-2xl border border-white/20 border-l-4 border-l-blue-500 md:col-span-2 bg-blue-50/10">
-                    {/* ... Test Zone Content ... (keep as is, I need to match the context properly) */}
                     <div className="flex items-center justify-between mb-4">
                         <div>
                             <h3 className="font-semibold text-lg text-blue-600 mb-1 flex items-center gap-2">
