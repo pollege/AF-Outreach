@@ -61,7 +61,22 @@ export default function CampaignDetailPage() {
             toast.error("Errore aggiornamento status");
         } else {
             setCampaign({ ...campaign, status: newStatus });
-            toast.success(`Campagna ${newStatus === 'active' ? 'attivata' : 'messa in pausa'}`);
+
+            if (newStatus === 'active') {
+                toast.success("Campagna attivata! Avvio pianificazione e invio...");
+
+                // Trigger Cron Jobs Immediately (Fire & Forget)
+                // 1. Schedule (Generate Messages)
+                fetch('/api/cron/schedule?force=true')
+                    .then(() => {
+                        // 2. Send (Process Queue)
+                        // Chain to ensure schedule runs first
+                        fetch('/api/cron/send?force=true');
+                    })
+                    .catch(e => console.error("Error triggering cron:", e));
+            } else {
+                toast.success("Campagna messa in pausa");
+            }
         }
     };
 
