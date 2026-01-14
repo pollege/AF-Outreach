@@ -96,10 +96,28 @@ export function LeadEditor({ lead, isOpen, onClose, onSave, campaignId }: LeadEd
 
             // 2. Persist Contact (Update by ID if exists, otherwise Upsert/Create)
             let contactId = lead?.contact_id || lead?.contacts?.id;
+
+            // Check for Email Collision (Smart Merge)
+            // If email changed, check if it already exists in another contact
+            // This handles the case where a lead was deleted but the contact remained
+            const originalEmail = lead?.contacts?.email || lead?.email;
+            if (formData.email && formData.email !== originalEmail) {
+                const { data: existingCollision } = await supabase
+                    .from('contacts')
+                    .eq('email', formData.email)
+                    .single();
+
+                if (existingCollision) {
+                    console.log("Email collision detected. Switching to existing contact ID:", existingCollision.id);
+                    contactId = existingCollision.id; // <--- SWITCH ID to the existing one
+                    toast.info("Email già presente nel database. Il lead verrà collegato al contatto esistente.");
+                }
+            }
+
             let contact;
 
             if (contactId) {
-                // UPDATE existing contact by ID to allow email changes
+                // UPDATE existing contact by ID (either original or the detected collision)
                 const { data: updatedContact, error: updateError } = await supabase
                     .from('contacts')
                     .update(contactPayload)
@@ -110,7 +128,7 @@ export function LeadEditor({ lead, isOpen, onClose, onSave, campaignId }: LeadEd
                 if (updateError) throw new Error("Errore aggiornamento contatto: " + updateError.message);
                 contact = updatedContact;
             } else {
-                // CREATE or UPSERT (fallback for new leads)
+                // CREATE or UPSERT (fallback for new leads with truly new emails)
                 const { data: newContact, error: createError } = await supabase
                     .from('contacts')
                     .upsert(contactPayload, { onConflict: 'email' })
