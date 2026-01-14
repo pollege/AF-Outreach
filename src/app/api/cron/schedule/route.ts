@@ -48,15 +48,28 @@ export async function GET(req: Request) {
             // If lead is 'researched' (meaning enriched & scored), has generic 'initial' step pending (step 0)
             // --- STEP 0: INITIAL EMAIL ---
             // If lead is 'researched' or 'new', has generic 'initial' step pending (step 0)
+            // If lead is 'researched' or 'new', has generic 'initial' step pending (step 0)
             const now = new Date().toISOString();
-            const { data: leadsForInitial } = await supabase
+
+            // 1. New Leads (Always trigger step 0)
+            const { data: leadsNew } = await supabase
                 .from('leads')
                 .select('*')
                 .eq('campaign_id', campaign.id)
-                .in('status', ['new', 'researched'])  // Fix: Allow NEW leads
+                .eq('status', 'new')
+                .limit(50);
+
+            // 2. Researched/Scheduled Leads (Trigger step 0 if due)
+            const { data: leadsResearched } = await supabase
+                .from('leads')
+                .select('*')
+                .eq('campaign_id', campaign.id)
+                .eq('status', 'researched')
                 .eq('outreach_step', 0)
-                .or(`next_action_at.is.null,next_action_at.lte.${now}`) // Fix: Allow NULL date
-                .limit(50); // Batch size
+                .lte('next_action_at', now)
+                .limit(50);
+
+            const leadsForInitial = [...(leadsNew || []), ...(leadsResearched || [])];
 
             if (leadsForInitial) {
                 for (const lead of leadsForInitial) {
