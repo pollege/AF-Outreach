@@ -32,17 +32,42 @@ export function LeadEditor({ lead, isOpen, onClose, onSave, campaignId }: LeadEd
 
     useEffect(() => {
         if (lead) {
-            // Prefer contact info, fallback to lead (legacy)
-            const c = lead.contacts || lead;
+            // Initial optimistic set from props
+            const initialC = lead.contacts || lead;
             setFormData({
-                first_name: c.first_name || '',
-                last_name: c.last_name || '',
-                company_name: c.company_name || '',
-                email: c.email || '',
-                job_title: c.job_title || '',
-                linkedin_url: c.linkedin_url || ''
+                first_name: initialC.first_name || '',
+                last_name: initialC.last_name || '',
+                company_name: initialC.company_name || '',
+                email: initialC.email || '',
+                job_title: initialC.job_title || '',
+                linkedin_url: initialC.linkedin_url || ''
             });
-            setCustomFields(c.custom_fields || {});
+            setCustomFields(initialC.custom_fields || {});
+
+            // Fetch fresh data from DB to ensure we aren't showing stale props
+            const fetchFresh = async () => {
+                const contactId = lead.contact_id || (lead.contacts && lead.contacts.id);
+                if (!contactId) return;
+
+                const { data: freshContact } = await supabase
+                    .from('contacts')
+                    .select('*')
+                    .eq('id', contactId)
+                    .single();
+
+                if (freshContact) {
+                    setFormData({
+                        first_name: freshContact.first_name || '',
+                        last_name: freshContact.last_name || '',
+                        company_name: freshContact.company_name || '',
+                        email: freshContact.email || '',
+                        job_title: freshContact.job_title || '',
+                        linkedin_url: freshContact.linkedin_url || ''
+                    });
+                    setCustomFields(freshContact.custom_fields || {});
+                }
+            };
+            fetchFresh();
         }
     }, [lead]);
 
