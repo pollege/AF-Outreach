@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 import { LeadEditor } from "@/components/leads/LeadEditor";
 import { LeadDetailsModal } from "@/components/leads/LeadDetailsModal";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 export default function LeadsPage() {
     const router = useRouter();
@@ -60,7 +61,24 @@ export default function LeadsPage() {
     const [campaignSelectorTarget, setCampaignSelectorTarget] = useState<any>(null);
     const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
     const [viewingLeadTab, setViewingLeadTab] = useState<'email' | 'enrichment' | 'details'>('email');
+    const [allCampaigns, setAllCampaigns] = useState<any[]>([]);
+    const [viewingLeadTab, setViewingLeadTab] = useState<'email' | 'enrichment' | 'details'>('email');
     const [viewingFocusField, setViewingFocusField] = useState<string | null>(null);
+
+    // Confirm Modal State
+    const [confirmConfig, setConfirmConfig] = useState<{
+        isOpen: boolean;
+        title: string;
+        description: string;
+        onConfirm: () => Promise<void> | void;
+        variant?: "default" | "destructive";
+        confirmText?: string;
+    }>({
+        isOpen: false,
+        title: "",
+        description: "",
+        onConfirm: () => { },
+    });
 
     useEffect(() => {
         fetchLeads();
@@ -480,16 +498,23 @@ export default function LeadsPage() {
         const leadIdsToDelete = getSelectedLeadIds();
         if (leadIdsToDelete.length === 0) return;
 
-        if (!confirm(`Sei sicuro di voler eliminare ${selectedContactIds.length} contatti (totale ${leadIdsToDelete.length} campagne) selezionati?`)) return;
-
-        const { error } = await supabase.from('leads').delete().in('id', leadIdsToDelete);
-        if (error) {
-            toast.error("Errore eliminazione: " + error.message);
-        } else {
-            toast.success(`${leadIdsToDelete.length} elementi eliminati`);
-            fetchLeads();
-            setSelectedContactIds([]);
-        }
+        setConfirmConfig({
+            isOpen: true,
+            title: "Elimina Contatti",
+            description: `Sei sicuro di voler eliminare ${selectedContactIds.length} contatti (totale ${leadIdsToDelete.length} campagne) selezionati? Questa azione non può essere annullata.`,
+            confirmText: "Elimina",
+            variant: "destructive",
+            onConfirm: async () => {
+                const { error } = await supabase.from('leads').delete().in('id', leadIdsToDelete);
+                if (error) {
+                    toast.error("Errore eliminazione: " + error.message);
+                } else {
+                    toast.success(`${leadIdsToDelete.length} elementi eliminati`);
+                    fetchLeads();
+                    setSelectedContactIds([]);
+                }
+            }
+        });
     };
 
     const handleSingleAddToCampaign = async (campaignId: string) => {
@@ -1003,6 +1028,17 @@ export default function LeadsPage() {
                 onClose={() => setEditingLead(null)}
                 // Refresh list on save
                 onSave={fetchLeads}
+            />
+
+            {/* Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmConfig.isOpen}
+                onClose={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))}
+                title={confirmConfig.title}
+                description={confirmConfig.description}
+                onConfirm={confirmConfig.onConfirm}
+                variant={confirmConfig.variant}
+                confirmText={confirmConfig.confirmText}
             />
 
             {/* View Details Modal */}

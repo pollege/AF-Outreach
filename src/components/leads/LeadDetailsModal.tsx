@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 interface LeadDetailsModalProps {
     lead: any;
@@ -64,6 +65,21 @@ export function LeadDetailsModal({ lead, isOpen, onClose, onLeadUpdate, onEdit, 
     const [showTagInput, setShowTagInput] = useState(false);
     const [relatedCampaigns, setRelatedCampaigns] = useState<any[]>([]);
     const [enrichmentType, setEnrichmentType] = useState('generic');
+
+    // Confirm Modal State
+    const [confirmConfig, setConfirmConfig] = useState<{
+        isOpen: boolean;
+        title: string;
+        description: string;
+        onConfirm: () => Promise<void> | void;
+        variant?: "default" | "destructive";
+        confirmText?: string;
+    }>({
+        isOpen: false,
+        title: "",
+        description: "",
+        onConfirm: () => { },
+    });
 
     // Sort to get truly latest message
     const sortedMessages = [...(lead?.messages || [])].sort((a: any, b: any) =>
@@ -158,24 +174,31 @@ export function LeadDetailsModal({ lead, isOpen, onClose, onLeadUpdate, onEdit, 
     const websiteUrl = findKey(customFields, ['website', 'url', 'site', 'web', 'company website', 'company_website', 'link', 'homepage', 'domain', 'company domain']);
 
     const handleRemoveFromCampaign = async (campaignLeadId: string, campaignName: string) => {
-        if (!confirm(`Sei sicuro di voler rimuovere questo contatto dalla campagna "${campaignName}"?`)) return;
+        setConfirmConfig({
+            isOpen: true,
+            title: "Rimuovi da Campagna",
+            description: `Sei sicuro di voler rimuovere questo contatto dalla campagna "${campaignName}"?`,
+            confirmText: "Rimuovi",
+            variant: "destructive",
+            onConfirm: async () => {
+                const { error } = await supabase.from('leads').delete().eq('id', campaignLeadId);
 
-        const { error } = await supabase.from('leads').delete().eq('id', campaignLeadId);
-
-        if (error) {
-            toast.error("Errore rimozione: " + error.message);
-        } else {
-            toast.success(`Rimosso da ${campaignName}`);
-            // If we deleted the CURRENT lead view, close modal or refresh
-            if (campaignLeadId === lead.id) {
-                onClose();
-                // Ideally trigger a refresh in parent, but close is safe
-            } else {
-                // Refresh related campaigns list
-                setRelatedCampaigns(prev => prev.filter(rc => rc.id !== campaignLeadId));
+                if (error) {
+                    toast.error("Errore rimozione: " + error.message);
+                } else {
+                    toast.success(`Rimosso da ${campaignName}`);
+                    // If we deleted the CURRENT lead view, close modal or refresh
+                    if (campaignLeadId === lead.id) {
+                        onClose();
+                        // Ideally trigger a refresh in parent, but close is safe
+                    } else {
+                        // Refresh related campaigns list
+                        setRelatedCampaigns(prev => prev.filter(rc => rc.id !== campaignLeadId));
+                    }
+                    if (onLeadUpdate) onLeadUpdate(lead);
+                }
             }
-            if (onLeadUpdate) onLeadUpdate(lead);
-        }
+        });
     };
 
     const handleSaveDraft = async () => {
@@ -815,6 +838,16 @@ export function LeadDetailsModal({ lead, isOpen, onClose, onLeadUpdate, onEdit, 
                     </div>
                 </div>
             </div>
+            {/* Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmConfig.isOpen}
+                onClose={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))}
+                title={confirmConfig.title}
+                description={confirmConfig.description}
+                onConfirm={confirmConfig.onConfirm}
+                variant={confirmConfig.variant}
+                confirmText={confirmConfig.confirmText}
+            />
         </div>
     );
 }
