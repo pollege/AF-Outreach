@@ -6,7 +6,7 @@ import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { Loader2, Upload, Users, BarChart3, Settings, Search, Timer } from "lucide-react";
+import { Loader2, Upload, Users, BarChart3, Settings, Search, Timer, RotateCw } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import Papa from "papaparse";
 import { toast } from "sonner";
@@ -21,10 +21,12 @@ export default function CampaignDetailPage() {
     const [campaign, setCampaign] = useState<any>(null);
     const [activeTab, setActiveTab] = useState<'overview' | 'leads' | 'import' | 'settings' | 'sequence'>('overview');
     const [loading, setLoading] = useState(true);
+    const [refreshTrigger, setRefreshTrigger] = useState(0); // Used to force reload of child tabs
 
     useEffect(() => {
         if (!id) return;
         async function fetchCampaign() {
+            // We fetch campaign details AND stats here
             const [campaignRes, leadsRes, sentRes] = await Promise.all([
                 supabase.from('campaigns').select('*').eq('id', id).single(),
                 supabase.from('leads').select('*', { count: 'exact', head: true }).eq('campaign_id', id),
@@ -50,7 +52,7 @@ export default function CampaignDetailPage() {
             setLoading(false);
         }
         fetchCampaign();
-    }, [id]);
+    }, [id, refreshTrigger]); // Re-fetch campaign stats on refreshTrigger
 
     const togglePause = async () => {
         if (!campaign) return;
@@ -68,7 +70,6 @@ export default function CampaignDetailPage() {
 
                 // Trigger Cron Jobs Server-Side
                 try {
-                    // toast.info("Generazione messaggi in corso...");
                     const result = await triggerCampaignImmediate(id);
 
                     if (result.success) {
@@ -85,15 +86,18 @@ export default function CampaignDetailPage() {
                         } else if (totalScheduled === 0 && totalSent === 0) {
                             toast.info("Nessuna azione necessaria (Code vuote).");
                         }
-
                     } else {
                         toast.error(`Errore attivazione: ${result.error}`);
                     }
                 } catch (error: any) {
                     toast.error("Errore server action: " + error.message);
+                } finally {
+                    // Force refresh of stats and table regardless of success/fail
+                    setRefreshTrigger(prev => prev + 1);
                 }
             } else {
                 toast.success("Campagna messa in pausa");
+                setRefreshTrigger(prev => prev + 1);
             }
         }
     };
@@ -119,6 +123,10 @@ export default function CampaignDetailPage() {
                     </div>
                 </div>
                 <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setRefreshTrigger(prev => prev + 1)}>
+                        <RotateCw className="w-4 h-4 mr-2" />
+                        Aggiorna
+                    </Button>
                     <Button variant="outline" onClick={togglePause}>
                         {campaign.status === 'active' ? 'Pausa' : 'Attiva'}
                     </Button>
@@ -154,8 +162,8 @@ export default function CampaignDetailPage() {
             {/* Content */}
             <div className="min-h-[400px]">
                 {activeTab === 'overview' && <OverviewTab campaign={campaign} />}
-                {activeTab === 'leads' && <LeadsTab campaignId={id} enrichmentEnabled={campaign.enrichment_enabled} />}
-                {activeTab === 'import' && <ImportTab campaignId={id} onImportSuccess={() => setActiveTab('leads')} />}
+                {activeTab === 'leads' && <LeadsTab campaignId={id} enrichmentEnabled={campaign.enrichment_enabled} refreshTrigger={refreshTrigger} />}
+                {activeTab === 'import' && <ImportTab campaignId={id} onImportSuccess={() => setRefreshTrigger(prev => prev + 1)} />}
                 {activeTab === 'sequence' && <SequenceEditor campaign={campaign} onUpdate={(c) => setCampaign(c)} />}
                 {activeTab === 'settings' && <SettingsTab campaign={campaign} onUpdate={(c) => setCampaign(c)} />}
             </div>
@@ -189,7 +197,7 @@ import { LeadsTable } from "@/components/leads/LeadsTable";
 import { ContactPickerModal } from "@/components/leads/ContactPickerModal";
 import { Edit2, Eye, Database } from "lucide-react";
 
-function LeadsTab({ campaignId, enrichmentEnabled }: { campaignId: string, enrichmentEnabled: boolean }) {
+function LeadsTab({ campaignId, enrichmentEnabled, refreshTrigger }: { campaignId: string, enrichmentEnabled: boolean, refreshTrigger: number }) {
     const [leads, setLeads] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingLead, setEditingLead] = useState<any>(null); // State for modal
@@ -208,7 +216,7 @@ function LeadsTab({ campaignId, enrichmentEnabled }: { campaignId: string, enric
             setLoading(false);
         }
         fetchLeads();
-    }, [campaignId]);
+    }, [campaignId, refreshTrigger]); // Re-fetch when refreshTrigger changes
 
     const handleSaveLead = (updatedLead: any) => {
         // Optimistic update
