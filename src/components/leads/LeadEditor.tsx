@@ -80,8 +80,17 @@ export function LeadEditor({ lead, isOpen, onClose, onSave, campaignId }: LeadEd
 
             if (lead.id) {
                 // UPDATE existing lead
-                // We actually updated the CONTACT above. Now we just return the lead with the updated contact.
-                // Optionally update lead-specific fields if we had them (e.g. status), but here we only edit contact info.
+                // We actually updated the CONTACT above. 
+                // CRITICAL FIX: We MUST also update the 'legacy' columns on the leads table 
+                // because the UI often reads from lead.first_name directly (not lead.contacts.first_name).
+                await supabase.from('leads').update({
+                    first_name: formData.first_name,
+                    last_name: formData.last_name,
+                    company_name: formData.company_name,
+                    email: formData.email, // keeping email in sync is good practice even if unique
+                    job_title: formData.job_title,
+                    linkedin_url: formData.linkedin_url
+                }).eq('id', lead.id);
 
                 // Fetch full lead to return
                 const { data, error } = await supabase
