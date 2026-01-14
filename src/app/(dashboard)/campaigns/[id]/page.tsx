@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/Input";
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { triggerCampaignImmediate } from "@/app/actions/campaign-trigger";
 
 export default function CampaignDetailPage() {
     const params = useParams();
@@ -65,45 +66,33 @@ export default function CampaignDetailPage() {
             if (newStatus === 'active') {
                 toast.success("Campagna attivata! Avvio pianificazione e invio...");
 
-                // Trigger Cron Jobs Immediately (Fire & Forget)
-                // We need to pass the user's Auth Token to bypass the Secret check
-                supabase.auth.getSession().then(async ({ data: { session } }) => {
-                    const token = session?.access_token;
+                // Trigger Cron Jobs Server-Side
+                try {
+                    // toast.info("Generazione messaggi in corso...");
+                    const result = await triggerCampaignImmediate();
 
-                    if (!token) {
-                        toast.error("Sessione non valida. Ricarica la pagina e riprova.");
-                        return;
-                    }
+                    if (result.success) {
+                        const totalScheduled = result.scheduled || 0;
+                        const totalSent = result.sent || 0;
 
-                    const headers: HeadersInit = { 'Authorization': `Bearer ${token}` };
-
-                    try {
-                        // 1. Schedule (Generate Messages)
-                        toast.info("Generazione messaggi in corso...");
-                        const scheduleRes = await fetch('/api/cron/schedule?force=true', { headers });
-                        const scheduleData = await scheduleRes.json();
-
-                        if (!scheduleRes.ok) throw new Error(scheduleData.error || "Errore scheduler");
-
-                        const count = scheduleData.scheduled || 0;
-                        if (count > 0) {
-                            toast.success(`${count} messaggi generati! Invio in corso...`);
-                        } else {
-                            toast.warning("Nessun messaggio generato. (Controlla che ci siano lead Nuovi e una Sequenza salvata)");
+                        if (totalScheduled > 0) {
+                            toast.success(`${totalScheduled} messaggi generati!`);
                         }
 
-                        // 2. Send (Process Queue) - Only if we didn't crash
-                        const sendRes = await fetch('/api/cron/send?force=true', { headers });
-                        const sendData = await sendRes.json();
-
-                        if (sendRes.ok && sendData.sent > 0) {
-                            toast.success(`${sendData.sent} email inviate!`);
+                        if (totalSent > 0) {
+                            toast.success(`${totalSent} email inviate!`);
                         }
-                    } catch (error: any) {
-                        console.error("Cron trigger error:", error);
-                        toast.error(`Errore attivazione: ${error.message}`);
+
+                        if (totalScheduled === 0 && totalSent === 0) {
+                            toast.warning("Nessun messaggio generato. (Controlla Lead Nuovi e Sequenza)");
+                        }
+
+                    } else {
+                        toast.error(`Errore attivazione: ${result.error}`);
                     }
-                });
+                } catch (error: any) {
+                    toast.error("Errore server action: " + error.message);
+                }
             } else {
                 toast.success("Campagna messa in pausa");
             }
