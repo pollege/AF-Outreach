@@ -251,7 +251,9 @@ export function LeadsTable({
         if (status === 'draft') return 'Bozza';
         if (status === 'queued') return 'In Coda';
         if (status === 'sent') return 'Inviato';
-        if (status === 'contacted') return 'Inviato'; // Map contacted to Inviato for user clarity
+        if (status === 'contacted') return 'Inviato';
+        if (status === 'opened') return 'Aperto';
+        if (status === 'responded') return 'Risposto';
         if (status === 'new') return 'Nuovo';
         if (status === 'researched') return 'Arricchito';
         if (status === 'message_generated') return 'Msg Generato';
@@ -523,47 +525,49 @@ export function LeadsTable({
                                         {/* Flat Specific Status */}
                                         {!groupByContact && showStatus && (
                                             <td className="px-6 py-4">
-                                                <span className="px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">
-                                                    {translateStatus(row.status)}
-                                                </span>
+                                                {translateStatus(row.status)}
+                                            </span>
                                             </td>
-                                        )}
-
-
-                                        {/* Actions */}
-                                        {allowedActions.length > 0 && (
-                                            <td className="px-6 py-4 text-right flex justify-end gap-2 sticky right-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm group-hover:bg-slate-50 dark:group-hover:bg-black/20 border-l border-transparent dark:border-white/5 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
-                                                {allowedActions.includes('view') && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={(e) => { e.stopPropagation(); onView(row.allocations?.[0]?.lead || row); }}
-                                                        className="hover:text-blue-500"
-                                                        title="Vedi Dettagli"
-                                                    >
-                                                        <Eye className="w-4 h-4" />
-                                                    </Button>
-                                                )}
-                                                {allowedActions.includes('edit') && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={(e) => { e.stopPropagation(); onEdit(row.allocations?.[0]?.lead || row); }}
-                                                        className="hover:text-blue-500"
-                                                        title="Modifica"
-                                                    >
-                                                        <Edit2 className="w-4 h-4" />
-                                                    </Button>
-                                                )}
-                                            </td>
-                                        )}
-                                    </tr>
                                 )
+                            }
+
+
+                                        {/* Actions */ }
+                                        {
+                                    allowedActions.length > 0 && (
+                                        <td className="px-6 py-4 text-right flex justify-end gap-2 sticky right-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm group-hover:bg-slate-50 dark:group-hover:bg-black/20 border-l border-transparent dark:border-white/5 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
+                                            {allowedActions.includes('view') && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={(e) => { e.stopPropagation(); onView(row.allocations?.[0]?.lead || row); }}
+                                                    className="hover:text-blue-500"
+                                                    title="Vedi Dettagli"
+                                                >
+                                                    <Eye className="w-4 h-4" />
+                                                </Button>
+                                            )}
+                                            {allowedActions.includes('edit') && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={(e) => { e.stopPropagation(); onEdit(row.allocations?.[0]?.lead || row); }}
+                                                    className="hover:text-blue-500"
+                                                    title="Modifica"
+                                                >
+                                                    <Edit2 className="w-4 h-4" />
+                                                </Button>
+                                            )}
+                                        </td>
+                                    )
+                                }
+                                    </tr>
+                    )
                             })
                         )}
-                    </tbody>
-                </table>
-            </div>
+                </tbody>
+            </table>
         </div>
+        </div >
     );
 }
