@@ -525,49 +525,55 @@ export function LeadsTable({
                                         {/* Flat Specific Status */}
                                         {!groupByContact && showStatus && (
                                             <td className="px-6 py-4">
-                                                {translateStatus(row.status)}
-                                            </span>
+                                                <span className={cn(
+                                                    "px-2 py-1 rounded-full text-xs font-medium uppercase tracking-wide",
+                                                    (row.status === 'opened' || row.status === 'responded') ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                                                        (row.status === 'sent' || row.status === 'contacted') ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
+                                                            (row.status === 'queued') ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" :
+                                                                "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                                                )}>
+                                                    {translateStatus(row.status)}
+                                                </span>
                                             </td>
-                                )
-                            }
+                                        )}
 
 
-                                        {/* Actions */ }
+                                        {/* Actions */}
                                         {
-                                    allowedActions.length > 0 && (
-                                        <td className="px-6 py-4 text-right flex justify-end gap-2 sticky right-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm group-hover:bg-slate-50 dark:group-hover:bg-black/20 border-l border-transparent dark:border-white/5 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
-                                            {allowedActions.includes('view') && (
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={(e) => { e.stopPropagation(); onView(row.allocations?.[0]?.lead || row); }}
-                                                    className="hover:text-blue-500"
-                                                    title="Vedi Dettagli"
-                                                >
-                                                    <Eye className="w-4 h-4" />
-                                                </Button>
-                                            )}
-                                            {allowedActions.includes('edit') && (
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={(e) => { e.stopPropagation(); onEdit(row.allocations?.[0]?.lead || row); }}
-                                                    className="hover:text-blue-500"
-                                                    title="Modifica"
-                                                >
-                                                    <Edit2 className="w-4 h-4" />
-                                                </Button>
-                                            )}
-                                        </td>
-                                    )
-                                }
+                                            allowedActions.length > 0 && (
+                                                <td className="px-6 py-4 text-right flex justify-end gap-2 sticky right-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm group-hover:bg-slate-50 dark:group-hover:bg-black/20 border-l border-transparent dark:border-white/5 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
+                                                    {allowedActions.includes('view') && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={(e) => { e.stopPropagation(); onView(row.allocations?.[0]?.lead || row); }}
+                                                            className="hover:text-blue-500"
+                                                            title="Vedi Dettagli"
+                                                        >
+                                                            <Eye className="w-4 h-4" />
+                                                        </Button>
+                                                    )}
+                                                    {allowedActions.includes('edit') && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={(e) => { e.stopPropagation(); onEdit(row.allocations?.[0]?.lead || row); }}
+                                                            className="hover:text-blue-500"
+                                                            title="Modifica"
+                                                        >
+                                                            <Edit2 className="w-4 h-4" />
+                                                        </Button>
+                                                    )}
+                                                </td>
+                                            )
+                                        }
                                     </tr>
-                    )
+                                )
                             })
                         )}
-                </tbody>
-            </table>
-        </div>
+                    </tbody>
+                </table>
+            </div>
         </div >
     );
 }
