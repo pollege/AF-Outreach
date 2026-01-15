@@ -251,6 +251,7 @@ export function LeadsTable({
         if (status === 'draft') return 'Bozza';
         if (status === 'queued') return 'In Coda';
         if (status === 'sent') return 'Inviato';
+        if (status === 'contacted') return 'Inviato'; // Map contacted to Inviato for user clarity
         if (status === 'new') return 'Nuovo';
         if (status === 'researched') return 'Arricchito';
         if (status === 'message_generated') return 'Msg Generato';

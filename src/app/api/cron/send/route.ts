@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabase as supabaseAnon } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
 // Vercel Config
 export const maxDuration = 60; // 1 minute should be enough for basic batches, but safer.
@@ -7,6 +8,14 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
     // Ideally this should be a POST to protect it, but GET is easier for simple cron services
+
+    // Initialize Admin Client if Key is available (Bypass RLS)
+    const supabaseAdmin = process.env.SUPABASE_SERVICE_ROLE_KEY
+        ? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY)
+        : null;
+
+    // Use Admin client for DB writes if available, otherwise fall back to Anon (and hope RLS is open)
+    const db = supabaseAdmin || supabaseAnon;
 
     try {
         const { searchParams } = new URL(req.url);
@@ -23,7 +32,7 @@ export async function GET(req: Request) {
         } else if (authHeader) {
             // Manual Trigger from UI
             const token = authHeader.replace('Bearer ', '');
-            const { data: { user }, error } = await supabase.auth.getUser(token);
+            const { data: { user }, error } = await supabaseAnon.auth.getUser(token);
             if (user && !error) isAuthenticated = true;
         }
 
@@ -37,7 +46,7 @@ export async function GET(req: Request) {
         console.log(`[Send Cron] Started. CampaignId: ${campaignId}, Force: ${forceMode}`);
 
         // 1. Check Limits (Simplified for MVP)
-        const { data: settings } = await supabase.from('email_settings').select('*').single();
+        const { data: settings } = await db.from('email_settings').select('*').single();
         const webhookUrl = settings?.n8n_webhook_url;
 
         if (!webhookUrl) {
@@ -47,7 +56,7 @@ export async function GET(req: Request) {
 
         // 2. Fetch Queued Messages
         // We select more fields and use a limit
-        let query = supabase
+        let query = db
             .from('messages')
             .select('*, leads(*, contacts(*)), campaigns(*)') // Fetch Deeply Linked Contacts
             .limit(10); // Batch size
@@ -78,7 +87,7 @@ export async function GET(req: Request) {
 
         // 3. LOCKING PHASE: Mark as 'sending' immediately to prevent race conditions
         const messageIds = messages.map(m => m.id);
-        const { error: lockError } = await supabase
+        const { error: lockError } = await db
             .from('messages')
             .update({ status: 'sending', sent_at: null }) // Temp status
             .in('id', messageIds);
@@ -119,13 +128,13 @@ export async function GET(req: Request) {
 
             // Direct Override
             if (msg.sender_account_id) {
-                const { data: directAcc } = await supabase.from('mail_accounts').select('*').eq('id', msg.sender_account_id).single();
+                const { data: directAcc } = await db.from('mail_accounts').select('*').eq('id', msg.sender_account_id).single();
                 if (directAcc && directAcc.status === 'active') senderAccount = directAcc;
             }
 
             // Campaign Override
             if (!senderAccount && campaign?.sender_account_id) {
-                const { data: overrideAcc } = await supabase.from('mail_accounts').select('*').eq('id', campaign.sender_account_id).single();
+                const { data: overrideAcc } = await db.from('mail_accounts').select('*').eq('id', campaign.sender_account_id).single();
                 if (overrideAcc && overrideAcc.status === 'active') {
                     if (overrideAcc.daily_sent < overrideAcc.daily_limit) {
                         senderAccount = overrideAcc;
@@ -140,7 +149,7 @@ export async function GET(req: Request) {
 
             // Auto Rotation
             if (!senderAccount && !campaign?.sender_account_id) {
-                const { data: allActive } = await supabase.from('mail_accounts').select('*').eq('status', 'active');
+                const { data: allActive } = await db.from('mail_accounts').select('*').eq('status', 'active');
                 // Simple random load balancing among those with quota
                 const candidates = allActive?.filter(a => a.daily_sent < a.daily_limit) || [];
                 if (candidates.length > 0) {
@@ -202,36 +211,27 @@ export async function GET(req: Request) {
                     console.log(`[Send Cron] Msg ${msg.id} SENT via n8n.`);
 
                     // Update Message Status
-                    await supabase.from('messages').update({
+                    await db.from('messages').update({
                         status: 'sent',
                         sent_at: new Date().toISOString(),
                         error_log: null
                     }).eq('id', msg.id);
 
                     // Update Lead Status
-                    // Also update the Lead status to 'connected' or 'sent' to reflect progress
-                    // We assume 'sent' or similar. Check your enum. 
-                    // Based on user feedback ("IN CODA" to "Inviato"), we should update Lead status if needed.
-                    // Actually, usually leads move to 'contacted' or stay 'active'.
-                    // Let's just update the message for now, the user sees message status in the UI. 
-                    // Wait, user said "Lead status" didn't update.
-                    // If the LeadsTable shows LEAD status, we must update LEAD status.
-                    // If it shows MESSAGE status, then updating message is enough.
-                    // Usually Leads Table shows "Status" column from the Lead table.
-                    // So we MUST update the Lead status to 'contacted' or similar?
-                    // Let's safe-check and update Lead to 'contacted' if it was 'new' or 'queued'.
-                    await supabase.from('leads').update({
-                        status: 'contacted'
-                        // Note: Ensure 'contacted' is a valid status enum in your DB. 
-                        // If not, maybe use 'active'? User mentioned "Inviato" for message. 
-                        // I will set it to 'contacted' which is standard.
+                    // Using 'sent' to map directly to "Inviato" in the UI
+                    const { error: leadUpdateError } = await db.from('leads').update({
+                        status: 'sent'
                     }).eq('id', lead.id);
 
+                    if (leadUpdateError) {
+                        console.error("[Send Cron] Lead Update Fatal Error:", leadUpdateError);
+                        // Don't fail the whole request, but log it
+                    } else {
+                        console.log(`[Send Cron] Lead ${lead.id} status updated to 'sent'.`);
+                    }
+
                     // Increment Sender Stats
-                    // Attempt RPC, ignore if fails (backward compatibility)
-                    // try { await supabase.rpc('increment_daily_sent', { account_id: senderAccount.id }); } catch (e) {} 
-                    // Manual update is safer for now:
-                    await supabase.from('mail_accounts').update({ daily_sent: senderAccount.daily_sent + 1 }).eq('id', senderAccount.id);
+                    await db.from('mail_accounts').update({ daily_sent: senderAccount.daily_sent + 1 }).eq('id', senderAccount.id);
 
                     sentIds.push(msg.id);
 
@@ -254,7 +254,7 @@ export async function GET(req: Request) {
         // 5. Cleanup Failed/Skipped Messages
         // We set them to 'sending' earlier. If they failed, we need to set them to 'failed' or 'queued' or 'draft'
         for (const f of failedIds) {
-            await supabase.from('messages').update({
+            await db.from('messages').update({
                 status: f.status,
                 error_log: f.error
             }).eq('id', f.id);
