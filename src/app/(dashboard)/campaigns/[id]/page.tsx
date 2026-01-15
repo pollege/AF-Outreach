@@ -209,7 +209,7 @@ function LeadsTab({ campaignId, enrichmentEnabled, refreshTrigger }: { campaignI
         async function fetchLeads() {
             const { data } = await supabase
                 .from('leads')
-                .select('*, contacts(*), messages(*)') // Link contacts
+                .select('*, contacts(*), campaigns(name), messages(*)') // Link contacts
                 .eq('campaign_id', campaignId)
                 .order('created_at', { ascending: false });
             setLeads(data || []);
